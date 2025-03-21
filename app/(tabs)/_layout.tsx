@@ -9,7 +9,11 @@ export default function TabLayout() {
         options={{
           title: "Home",
           tabBarIcon: ({ color }) => (
-            <FontAwesome size={28} name="camera" color={color} />
+            <FontAwesome
+              size={28}
+              name="camera"
+              color={color}
+            />
           ),
         }}
       />
@@ -18,7 +22,11 @@ export default function TabLayout() {
         options={{
           title: "Photos",
           tabBarIcon: ({ color }) => (
-            <FontAwesome size={28} name="photo" color={color} />
+            <FontAwesome
+              size={28}
+              name="photo"
+              color={color}
+            />
           ),
         }}
       />
