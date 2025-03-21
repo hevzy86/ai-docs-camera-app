@@ -22,6 +22,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useLocalSearchParams } from "expo-router";
 
+
 export default function CameraTab() {
   const [facing, setFacing] = useState<"back" | "front">("back");
   const [zoom, setZoom] = useState(0);
