@@ -152,6 +152,7 @@ const Detail = () => {
 
             console.log("Received response from OpenAI"); // Debug log
             setAiAnalysis(response.choices[0].message.content);
+            setIsAnalyzing(false);
             resolve(response.choices[0].message.content);
           } catch (error: any) {
             console.error("Error in OpenAI API call:", error);
@@ -164,6 +165,7 @@ const Detail = () => {
             setAiAnalysis(
               `Error analyzing image: ${error.message}`
             );
+            setIsAnalyzing(false);
             reject(error);
           }
         };
@@ -172,6 +174,7 @@ const Detail = () => {
           setAiAnalysis(
             "Error processing image. Please try again."
           );
+          setIsAnalyzing(false);
           reject(error);
         };
         reader.readAsDataURL(blob);
@@ -207,7 +210,7 @@ const Detail = () => {
             style={styles.closeButton}
             onPress={closePhoto}
           >
-            <Text style={styles.closeButtonText}>@</Text>
+            <Text style={styles.closeButtonText}>←</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.analyzeButton}
@@ -217,7 +220,11 @@ const Detail = () => {
             disabled={isAnalyzing}
           >
             <Text style={styles.analyzeButtonText}>
-              {isAnalyzing ? "Analyzing..." : "Analyze Image"}
+              {isAnalyzing
+                ? "Analyzing..."
+                : aiAnalysis
+                ? "Done"
+                : "Analyze Image"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -228,7 +235,7 @@ const Detail = () => {
           resizeMode="contain"
         />
 
-        {isAnalyzing && (
+        {isAnalyzing && !aiAnalysis && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator
               size="large"
@@ -320,15 +327,18 @@ const styles = StyleSheet.create({
   },
 
   closeButton: {
-    position: "absolute",
-    top: 40,
-    right: 20,
-    zIndex: 1,
+    backgroundColor: "#007AFF",
+    padding: 10,
+    borderRadius: 8,
+    minWidth: 50,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   closeButtonText: {
     color: "white",
-    fontSize: 36, // Fixed typo here
+    fontSize: 24,
+    fontWeight: "600",
   },
 
   header: {
