@@ -3,6 +3,7 @@ import {
   Image,
   ActivityIndicator,
   ScrollView,
+  Alert,
 } from "react-native";
 import React, {
   useState,
@@ -25,11 +26,17 @@ import {
   CameraCapturedPicture,
   BarcodeScanningResult,
 } from "expo-camera";
+import * as DocumentPicker from "expo-document-picker";
 import Slider from "@react-native-community/slider";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useLocalSearchParams } from "expo-router";
 import OpenAI from "openai";
+import * as FileSystem from "expo-file-system";
+import {
+  manipulateAsync,
+  SaveFormat,
+} from "expo-image-manipulator";
 
 import {
   useNavigation,
@@ -103,7 +110,10 @@ const Detail = () => {
     setSelectedPhoto(null);
   };
 
-  const analyzeImage = async (imageUri: string) => {
+  const analyzeImage = async (
+    imageUri: string,
+    mimeType?: string
+  ) => {
     try {
       setIsAnalyzing(true);
       setAiAnalysis(null);
@@ -112,8 +122,31 @@ const Detail = () => {
         throw new Error("OpenAI API key is not configured");
       }
 
+      // Check if it's a PDF
+      if (mimeType === "application/pdf") {
+        setAiAnalysis(
+          "PDF analysis is not supported yet. Please upload images in PNG, JPEG, GIF, or WEBP format."
+        );
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // For images, ensure they're in a supported format
+      let processedImageUri = imageUri;
+      if (
+        !imageUri
+          .toLowerCase()
+          .match(/\.(png|jpg|jpeg|gif|webp)$/)
+      ) {
+        // Convert to JPEG format
+        const manipResult = await manipulateAsync(imageUri, [], {
+          format: SaveFormat.JPEG,
+        });
+        processedImageUri = manipResult.uri;
+      }
+
       // First, fetch the image
-      const response = await fetch(imageUri);
+      const response = await fetch(processedImageUri);
       const blob = await response.blob();
 
       // Convert blob to base64
@@ -130,6 +163,7 @@ const Detail = () => {
             const response =
               await openai.chat.completions.create({
                 model: "gpt-4o-mini",
+
                 messages: [
                   {
                     role: "user",
@@ -183,6 +217,53 @@ const Detail = () => {
       console.error("Error in analyzeImage:", error);
       setAiAnalysis(`Error: ${error.message}`);
       setIsAnalyzing(false);
+    }
+  };
+
+  const pickDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["image/*", "application/pdf"],
+        multiple: false,
+      });
+
+      if (result.assets && result.assets.length > 0) {
+        const selectedAsset = result.assets[0];
+        const mimeType = selectedAsset.mimeType;
+
+        // Check if file is PDF
+        if (mimeType === "application/pdf") {
+          Alert.alert(
+            "Unsupported Format",
+            "PDF analysis is not supported yet. Please upload images in PNG, JPEG, GIF, or WEBP format.",
+            [{ text: "OK" }]
+          );
+          return;
+        }
+
+        // Add the picked document/image to capturedPhotos
+        const newPhoto = { uri: selectedAsset.uri };
+        const updatedPhotos = [newPhoto, ...capturedPhotos];
+
+        // Save to AsyncStorage
+        await AsyncStorage.setItem(
+          "capturedPhotos",
+          JSON.stringify(updatedPhotos)
+        );
+
+        setCapturedPhotos(updatedPhotos);
+
+        // Automatically open and analyze the uploaded file
+        setSelectedPhoto(newPhoto);
+        analyzeImage(selectedAsset.uri, mimeType);
+      }
+    } catch (error) {
+      console.error("Error picking document:", error);
+      Alert.alert(
+        "Error",
+        "Failed to process the selected file. Please try again with a different file.",
+        [{ text: "OK" }]
+      );
     }
   };
 
@@ -274,6 +355,16 @@ const Detail = () => {
 
   return (
     <View style={styles.container}>
+      <View style={styles.headerButtons}>
+        <TouchableOpacity
+          style={styles.importButton}
+          onPress={pickDocument}
+        >
+          <Text style={styles.importButtonText}>
+            Import File
+          </Text>
+        </TouchableOpacity>
+      </View>
       {capturedPhotos.length > 0 ? (
         <FlatList
           data={capturedPhotos}
@@ -414,6 +505,26 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 10,
     alignItems: "center",
+  },
+
+  headerButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    padding: 10,
+    marginTop: 10,
+  },
+
+  importButton: {
+    backgroundColor: "#007AFF",
+    padding: 10,
+    borderRadius: 8,
+    marginHorizontal: 10,
+  },
+
+  importButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });
 
