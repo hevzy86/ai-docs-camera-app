@@ -2,6 +2,7 @@ import {
   FlatList,
   Image,
   ActivityIndicator,
+  ScrollView,
 } from "react-native";
 import React, {
   useState,
@@ -240,9 +241,25 @@ const Detail = () => {
         )}
 
         {aiAnalysis && (
-          <View style={styles.analysisContainer}>
-            <Text style={styles.analysisText}>{aiAnalysis}</Text>
-          </View>
+          <Modal
+            visible={!!aiAnalysis}
+            transparent={true}
+            animationType="slide"
+          >
+            <SafeAreaView style={styles.analysisModalContainer}>
+              <ScrollView style={styles.analysisScrollView}>
+                <Text style={styles.analysisText}>
+                  {aiAnalysis}
+                </Text>
+              </ScrollView>
+              <TouchableOpacity
+                style={styles.closeAnalysisButton}
+                onPress={() => setAiAnalysis(null)}
+              >
+                <Text style={styles.closeButtonText}>Close</Text>
+              </TouchableOpacity>
+            </SafeAreaView>
+          </Modal>
         )}
       </SafeAreaView>
     </Modal>
@@ -356,20 +373,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 
-  analysisContainer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "rgba(0,0,0,0.8)",
+  analysisModalContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
     padding: 20,
-    maxHeight: "30%",
+    justifyContent: "center",
+  },
+
+  analysisScrollView: {
+    flex: 1,
+    marginBottom: 60,
+    marginHorizontal: 10,
   },
 
   analysisText: {
     color: "white",
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: 18,
+    lineHeight: 28,
+    textAlign: "center",
+    paddingTop: 20,
+    paddingHorizontal: 10,
+  },
+
+  closeAnalysisButton: {
+    position: "absolute",
+    bottom: 40,
+    left: 20,
+    right: 20,
+    backgroundColor: "#007AFF",
+    padding: 15,
+    borderRadius: 10,
+    alignItems: "center",
   },
 });
 

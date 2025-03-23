@@ -147,7 +147,7 @@ export default function CameraTab() {
             barcodeTypes: [
               "qr",
               "ean13",
-              "ean8",
+              "ean8",    
               "pdf417",
               "aztec",
               "datamatrix",
@@ -177,7 +177,7 @@ export default function CameraTab() {
           </View>
 
           <View style={styles.row}>
-            <Text style={styles.text}>
+          <Text style={[styles.text, { color: "white" }]}>
               Zoom: {zoom.toFixed(1)}x
             </Text>
             <Slider
