@@ -9,6 +9,8 @@ import {
   Dimensions,
   SafeAreaView,
   ScrollView,
+  PanResponder,
+  Animated,
 } from "react-native";
 import {
   CameraView,
@@ -47,10 +49,56 @@ const Detail = () => {
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>("");
+  const [isAnalysisCollapsed, setIsAnalysisCollapsed] = useState(false);
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
+
+  // Animation value for panel height
+  const panelHeight = useRef(new Animated.Value(1)).current;
 
   // Simple cache for image analysis results
   const analysisCache = useRef<Record<string, string>>({});
+
+  // Configure pan responder for swipe gestures
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderMove: (_, gestureState) => {
+        // Only respond to downward and upward swipes
+        if (Math.abs(gestureState.dy) > Math.abs(gestureState.dx)) {
+          if (gestureState.dy > 20 && !isAnalysisCollapsed) {
+            // Swipe down - collapse
+            setIsAnalysisCollapsed(true);
+            Animated.timing(panelHeight, {
+              toValue: 0,
+              duration: 200,
+              useNativeDriver: false,
+            }).start();
+          } else if (gestureState.dy < -20 && isAnalysisCollapsed) {
+            // Swipe up - expand
+            setIsAnalysisCollapsed(false);
+            Animated.timing(panelHeight, {
+              toValue: 1,
+              duration: 200,
+              useNativeDriver: false,
+            }).start();
+          }
+        }
+      },
+      onPanResponderRelease: () => {
+        // Optional: Add bounce-back animation if needed
+      },
+    })
+  ).current;
+
+  // Toggle panel with animation
+  const togglePanel = () => {
+    setIsAnalysisCollapsed(!isAnalysisCollapsed);
+    Animated.timing(panelHeight, {
+      toValue: isAnalysisCollapsed ? 1 : 0,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
+  };
 
   // Add API key check
   useEffect(() => {
@@ -252,11 +300,35 @@ const Detail = () => {
         )}
 
         {aiAnalysis && (
-          <View style={styles.analysisContainer}>
-            <ScrollView style={styles.scrollView}>
+          <Animated.View
+            style={[
+              styles.analysisContainer,
+              {
+                maxHeight: panelHeight.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ["8%", "40%"],
+                }),
+              },
+            ]}
+            {...panResponder.panHandlers}
+          >
+            <TouchableOpacity
+              style={styles.handleContainer}
+              onPress={togglePanel}
+              activeOpacity={0.7}
+            >
+              <View style={styles.handle} />
+            </TouchableOpacity>
+
+            <ScrollView
+              style={[
+                styles.scrollView,
+                isAnalysisCollapsed ? styles.hidden : null,
+              ]}
+            >
               <Text style={styles.analysisText}>{aiAnalysis}</Text>
             </ScrollView>
-          </View>
+          </Animated.View>
         )}
       </SafeAreaView>
     </Modal>
@@ -375,9 +447,29 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "rgba(0,0,0,0.8)",
-    padding: 20,
-    maxHeight: "40%",
+    backgroundColor: "rgba(28,28,30,0.92)", // More Apple-like dark color
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    overflow: "hidden",
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+
+  handleContainer: {
+    width: "100%",
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+
+  handle: {
+    width: 36,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.3)",
+  },
+
+  hidden: {
+    display: "none",
   },
 
   scrollView: {
@@ -388,6 +480,8 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     lineHeight: 24,
+    fontWeight: "400",
+    paddingBottom: 20,
   },
 });
 
