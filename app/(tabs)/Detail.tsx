@@ -53,6 +53,8 @@ const Detail = () => {
   const [isAnalysisCollapsed, setIsAnalysisCollapsed] = useState(false);
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const scrollViewRef = useRef<ScrollView>(null);
+  const params = useLocalSearchParams();
+  const analyzeImmediately = params.analyzeImmediately === "true";
 
   // Animation value for panel height
   const panelHeight = useRef(new Animated.Value(1)).current;
@@ -188,6 +190,28 @@ const Detail = () => {
 
     return () => unsubscribe();
   }, [navigation, loadSavedPhotos]);
+
+  // Effect to handle automatic analysis when navigated with analyzeImmediately=true
+  useEffect(() => {
+    const handleImmediateAnalysis = async () => {
+      if (analyzeImmediately && capturedPhotos.length > 0) {
+        // Get the most recent photo (first in the array)
+        const mostRecentPhoto = capturedPhotos[0];
+
+        // Open the photo
+        await openPhoto(mostRecentPhoto);
+
+        // Start analyzing after a short delay to ensure the UI is updated
+        setTimeout(() => {
+          if (mostRecentPhoto) {
+            analyzeImage(mostRecentPhoto.uri);
+          }
+        }, 500);
+      }
+    };
+
+    handleImmediateAnalysis();
+  }, [analyzeImmediately, capturedPhotos]);
 
   const openPhoto = async (item: PhotoItem) => {
     // Clear any previous analysis when opening a new photo

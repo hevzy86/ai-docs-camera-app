@@ -20,8 +20,12 @@ export default function CameraTab() {
   const [permission, requestPermission] = useCameraPermissions();
   const [isBarcodeMode, setIsBarcodeMode] = useState(false);
   const [barcodeResult, setBarcodeResult] = useState<string | null>(null);
+  const [lastCapturedPhoto, setLastCapturedPhoto] = useState<{
+    uri: string;
+  } | null>(null);
 
   const cameraRef = useRef<CameraView>(null);
+  const router = useRouter();
 
   useEffect(() => {
     loadSavedPhotos();
@@ -76,6 +80,8 @@ export default function CameraTab() {
         if (photo?.uri) {
           // Ensure photo and photo.uri exist
           await savePhoto({ uri: photo.uri });
+          // Set the last captured photo to show the analyze button
+          setLastCapturedPhoto({ uri: photo.uri });
         } else {
           console.error("Captured photo is undefined or invalid.");
         }
@@ -84,6 +90,18 @@ export default function CameraTab() {
       }
     }
   }, [savePhoto]);
+
+  const analyzeLastPhoto = useCallback(() => {
+    if (lastCapturedPhoto) {
+      // Navigate to the detail screen with a query parameter to indicate immediate analysis
+      router.push({
+        pathname: "/Detail",
+        params: { analyzeImmediately: "true" },
+      });
+      // Clear the last captured photo state
+      setLastCapturedPhoto(null);
+    }
+  }, [lastCapturedPhoto, router]);
 
   const toggleBarcodeMode = useCallback(() => {
     setIsBarcodeMode((prev) => !prev);
@@ -173,6 +191,14 @@ export default function CameraTab() {
               >
                 <Text style={styles.captureButtonText}>Take Photo</Text>
               </TouchableOpacity>
+              {lastCapturedPhoto && (
+                <TouchableOpacity
+                  style={styles.analyzeButton}
+                  onPress={analyzeLastPhoto}
+                >
+                  <Text style={styles.analyzeButtonText}>Analyze</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
@@ -251,6 +277,18 @@ const styles = StyleSheet.create({
 
   captureButtonText: {
     color: "#000",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  analyzeButton: {
+    backgroundColor: "#4CAF50", // Green color for the analyze button
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 30,
+    marginLeft: 10,
+  },
+  analyzeButtonText: {
+    color: "#fff",
     fontSize: 18,
     fontWeight: "bold",
   },
