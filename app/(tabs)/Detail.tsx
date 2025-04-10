@@ -36,6 +36,20 @@ type PhotoItem = {
   uri: string;
 };
 
+type Language = "en" | "es" | "ru";
+
+type LanguageOption = {
+  code: Language;
+  label: string;
+  flag: string;
+};
+
+const languages: LanguageOption[] = [
+  { code: "en", label: "English", flag: "🇺🇸" },
+  { code: "es", label: "Español", flag: "🇪🇸" },
+  { code: "ru", label: "Русский", flag: "🇷🇺" },
+];
+
 const { width, height } = Dimensions.get("window");
 const itemSize = width / 3;
 
@@ -51,6 +65,8 @@ const Detail = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>("");
   const [isAnalysisCollapsed, setIsAnalysisCollapsed] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<Language>("en");
+  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const scrollViewRef = useRef<ScrollView>(null);
   const params = useLocalSearchParams();
@@ -164,11 +180,222 @@ const Detail = () => {
         "Saved analysis to persistent storage with hash:",
         imageHash.substring(0, 10) + "..."
       );
+
+      // Also save with language information for the new translation system
+      const analysisData = {
+        text: analysis,
+        timestamp: new Date().toISOString(),
+        language: selectedLanguage,
+      };
+
+      await AsyncStorage.setItem(
+        `analysis_${imageUri}_${selectedLanguage}`,
+        JSON.stringify(analysisData)
+      );
+      console.log(
+        `Saved analysis for ${imageUri.substring(
+          0,
+          20
+        )}... in ${selectedLanguage}`
+      );
     } catch (error) {
       console.error("Failed to save analysis to storage", error);
     }
   };
 
+  // Load saved language preference
+  const loadLanguagePreference = useCallback(async () => {
+    try {
+      const savedLanguage = await AsyncStorage.getItem("selectedLanguage");
+      if (savedLanguage) {
+        setSelectedLanguage(savedLanguage as Language);
+        console.log("Loaded language preference:", savedLanguage);
+      }
+    } catch (error) {
+      console.error("Failed to load language preference", error);
+    }
+  }, []);
+
+  // Save language preference
+  const saveLanguagePreference = async (language: Language) => {
+    try {
+      await AsyncStorage.setItem("selectedLanguage", language);
+      console.log("Saved language preference:", language);
+    } catch (error) {
+      console.error("Failed to save language preference", error);
+    }
+  };
+
+  // Translate existing analysis to the new language
+  const translateAnalysis = async (text: string, targetLanguage: Language) => {
+    try {
+      setIsAnalyzing(true);
+      console.log(`Translating existing analysis to ${targetLanguage}...`);
+
+      let promptText = "";
+      if (targetLanguage === "en") {
+        promptText = `Translate the following text to English: "${text}"`;
+      } else if (targetLanguage === "es") {
+        promptText = `Translate the following text to Spanish: "${text}"`;
+      } else if (targetLanguage === "ru") {
+        promptText = `Translate the following text to Russian: "${text}"`;
+      }
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: promptText,
+          },
+        ],
+      });
+
+      const translatedText =
+        response.choices[0].message.content || "Translation failed";
+      console.log("Translation completed");
+      setAiAnalysis(translatedText);
+
+      // Create a hash for the translated text
+      const imageHash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        `${selectedPhoto?.uri}_${targetLanguage}`
+      );
+
+      // Save the translation to cache
+      await saveAnalysisToStorage(
+        selectedPhoto?.uri || "",
+        translatedText,
+        imageHash
+      );
+
+      return translatedText;
+    } catch (error) {
+      console.error("Error translating text:", error);
+      return `Error translating text: ${error}`;
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Get all cached analyses
+  const getAllCachedAnalyses = async () => {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const analysisKeys = keys.filter((key) => key.startsWith("analysis_"));
+      const analyses = await AsyncStorage.multiGet(analysisKeys);
+      return analyses.map(([key, value]) => {
+        const uri = key.replace("analysis_", "").split("_")[0]; // Extract URI from the key
+        return {
+          key,
+          uri,
+          analysis: value,
+        };
+      });
+    } catch (error) {
+      console.error("Error getting all cached analyses:", error);
+      return [];
+    }
+  };
+
+  // Translate all cached analyses to the new language
+  const translateAllCachedAnalyses = async (targetLanguage: Language) => {
+    try {
+      console.log("Translating all cached analyses to", targetLanguage);
+
+      // Get all cached analyses
+      const cachedAnalyses = await getAllCachedAnalyses();
+
+      // Filter analyses that don't already have a translation in the target language
+      const analysesToTranslate = cachedAnalyses.filter((item) => {
+        // Check if this is from a different language
+        return !item.key.includes(`_${targetLanguage}`);
+      });
+
+      console.log(`Found ${analysesToTranslate.length} analyses to translate`);
+
+      // Translate each analysis
+      for (const item of analysesToTranslate) {
+        if (item.analysis) {
+          console.log(
+            `Translating analysis for URI: ${item.uri.substring(0, 20)}...`
+          );
+
+          // Only translate if we have an analysis
+          const analysis = JSON.parse(item.analysis);
+
+          // Skip if this is already in the target language
+          if (analysis.language === targetLanguage) {
+            console.log("Analysis already in target language, skipping");
+            continue;
+          }
+
+          // Create a background translation task
+          translateAnalysisInBackground(
+            analysis.text,
+            item.uri,
+            targetLanguage
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Error translating all cached analyses:", error);
+    }
+  };
+
+  // Translate analysis in background without blocking UI
+  const translateAnalysisInBackground = async (
+    text: string,
+    imageUri: string,
+    targetLanguage: Language
+  ) => {
+    try {
+      console.log(
+        `Background translation for ${imageUri.substring(
+          0,
+          20
+        )}... to ${targetLanguage}`
+      );
+
+      let promptText = "";
+      if (targetLanguage === "en") {
+        promptText = `Translate the following text to English: "${text}"`;
+      } else if (targetLanguage === "es") {
+        promptText = `Translate the following text to Spanish: "${text}"`;
+      } else if (targetLanguage === "ru") {
+        promptText = `Translate the following text to Russian: "${text}"`;
+      }
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: promptText,
+          },
+        ],
+      });
+
+      const translatedText =
+        response.choices[0].message.content || "Translation failed";
+      console.log(
+        `Background translation completed for ${imageUri.substring(0, 20)}...`
+      );
+
+      // Create a hash for the translated text
+      const imageHash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        `${imageUri}_${targetLanguage}`
+      );
+
+      // Save the translation to cache
+      await saveAnalysisToStorage(imageUri, translatedText, imageHash);
+    } catch (error) {
+      console.error("Error in background translation:", error);
+    }
+  };
+
+  // Load saved photos
   const loadSavedPhotos = useCallback(async () => {
     try {
       const savedPhotos = await AsyncStorage.getItem("capturedPhotos");
@@ -178,10 +405,11 @@ const Detail = () => {
 
       // Load the analysis cache when loading photos
       await loadAnalysisCache();
+      await loadLanguagePreference();
     } catch (error) {
       console.error("Failed to load photos", error);
     }
-  }, [loadAnalysisCache]);
+  }, [loadAnalysisCache, loadLanguagePreference]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () => {
@@ -213,6 +441,17 @@ const Detail = () => {
     handleImmediateAnalysis();
   }, [analyzeImmediately, capturedPhotos]);
 
+  // Effect to ensure panel is expanded when a photo with analysis is shown
+  useEffect(() => {
+    // If we have analysis, make sure the panel is expanded
+    if (aiAnalysis) {
+      console.log("Analysis detected, ensuring panel is expanded");
+      setIsAnalysisCollapsed(false);
+      // Reset animation value to expanded state
+      panelHeight.setValue(1);
+    }
+  }, [selectedPhoto, aiAnalysis]);
+
   const openPhoto = async (item: PhotoItem) => {
     // Clear any previous analysis when opening a new photo
     setAiAnalysis(null);
@@ -226,7 +465,7 @@ const Detail = () => {
       // Create a hash for this image
       const imageHash = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
-        item.uri
+        `${item.uri}_${selectedLanguage}` // Include language in the hash
       );
 
       // Check in-memory cache first
@@ -277,10 +516,10 @@ const Detail = () => {
         imageUri.substring(0, 30) + "..."
       );
 
-      // Create a unique hash for this image based on the original URI
+      // Create a unique hash for this image based on the original URI and language
       const imageHash = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
-        imageUri // Use the original URI, not the optimized one
+        `${imageUri}_${selectedLanguage}` // Include language in the hash
       );
 
       console.log("Generated image hash:", imageHash.substring(0, 10) + "...");
@@ -348,6 +587,27 @@ const Detail = () => {
             setAnalysisStep("Sending to AI for analysis...");
             console.log("Sending request to OpenAI..."); // Debug log
 
+            let promptText =
+              "Describe this image in general terms. If there are people, describe the scene generally without identifying individuals.";
+
+            // Add language instruction based on selected language
+            console.log("Setting prompt for language:", selectedLanguage);
+
+            if (selectedLanguage === "es") {
+              console.log("Using Spanish prompt");
+              promptText =
+                "Describe esta imagen en términos generales. Si hay personas, describe la escena en general sin identificar a las personas. Responde completamente en español.";
+            } else if (selectedLanguage === "ru") {
+              console.log("Using Russian prompt");
+              promptText =
+                "Опишите это изображение в общих чертах. Если на нем есть люди, опишите сцену в целом, не идентифицируя людей. Ответьте полностью на русском языке.";
+            } else {
+              console.log("Using English prompt");
+            }
+
+            console.log(`Using prompt for language: ${selectedLanguage}`);
+            console.log(`Prompt text: ${promptText.substring(0, 30)}...`);
+
             const response = await openai.chat.completions.create({
               model: "gpt-4o-mini",
               messages: [
@@ -356,7 +616,7 @@ const Detail = () => {
                   content: [
                     {
                       type: "text",
-                      text: "What do you see in this image? Please describe it in detail.",
+                      text: promptText,
                     },
                     {
                       type: "image_url",
@@ -380,6 +640,16 @@ const Detail = () => {
             await saveAnalysisToStorage(imageUri, analysisResult, imageHash);
 
             setAiAnalysis(analysisResult);
+
+            // Ensure the panel is expanded when analysis completes
+            setIsAnalysisCollapsed(false);
+            // Animate the panel to expanded state
+            Animated.timing(panelHeight, {
+              toValue: 1,
+              duration: 200,
+              useNativeDriver: false,
+            }).start();
+
             resolve(analysisResult);
           } catch (error: any) {
             console.error("Error in OpenAI API call:", error);
@@ -422,6 +692,40 @@ const Detail = () => {
     </TouchableOpacity>
   );
 
+  const renderLanguageSwitcher = () => (
+    <View style={styles.languageSwitcherContainer}>
+      <TouchableOpacity
+        style={styles.languageButton}
+        onPress={() => setIsLanguageMenuOpen(!isLanguageMenuOpen)}
+      >
+        <Text style={styles.languageButtonText}>
+          {languages.find((lang) => lang.code === selectedLanguage)?.flag}{" "}
+          {selectedLanguage.toUpperCase()}
+        </Text>
+      </TouchableOpacity>
+
+      {isLanguageMenuOpen && (
+        <View style={styles.languageMenu}>
+          {languages.map((language) => (
+            <TouchableOpacity
+              key={language.code}
+              style={[
+                styles.languageOption,
+                selectedLanguage === language.code &&
+                  styles.selectedLanguageOption,
+              ]}
+              onPress={() => changeLanguage(language.code)}
+            >
+              <Text style={styles.languageOptionText}>
+                {language.flag} {language.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+
   const renderFullScreenPhoto = () => (
     <Modal
       visible={selectedPhoto !== null}
@@ -436,13 +740,24 @@ const Detail = () => {
           >
             <Text style={styles.closeButtonText}>←</Text>
           </TouchableOpacity>
+
+          {/* Language switcher in the middle of the header */}
+          {renderLanguageSwitcher()}
+
           <TouchableOpacity
             style={styles.analyzeButton}
             onPress={() => selectedPhoto && analyzeImage(selectedPhoto.uri)}
             disabled={isAnalyzing}
           >
             <Text style={styles.analyzeButtonText}>
-              {isAnalyzing ? "Analyzing..." : "Analyze Image"}
+              {isAnalyzing ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#fff"
+                />
+              ) : (
+                "Analyze Image"
+              )}
             </Text>
           </TouchableOpacity>
         </View>
@@ -501,6 +816,118 @@ const Detail = () => {
       </SafeAreaView>
     </Modal>
   );
+
+  // Load analysis from storage
+  const loadAnalysisFromStorage = async (imageUri: string) => {
+    try {
+      // Try to load analysis for the current language
+      const key = `analysis_${imageUri}_${selectedLanguage}`;
+      const savedAnalysis = await AsyncStorage.getItem(key);
+
+      if (savedAnalysis) {
+        const parsedAnalysis = JSON.parse(savedAnalysis);
+        console.log(
+          `Loaded cached analysis for ${imageUri.substring(
+            0,
+            20
+          )}... in ${selectedLanguage}`
+        );
+        return parsedAnalysis.text;
+      }
+
+      // If no analysis for current language, check if we have it in any language
+      const keys = await AsyncStorage.getAllKeys();
+      const matchingKeys = keys.filter((k) =>
+        k.startsWith(`analysis_${imageUri}_`)
+      );
+
+      if (matchingKeys.length > 0) {
+        // We have analysis in another language, translate it immediately
+        const otherLangAnalysis = await AsyncStorage.getItem(matchingKeys[0]);
+        if (otherLangAnalysis) {
+          const parsedAnalysis = JSON.parse(otherLangAnalysis);
+          console.log(
+            `Found analysis in different language, translating from ${parsedAnalysis.language} to ${selectedLanguage}`
+          );
+
+          setIsAnalyzing(true);
+
+          let promptText = "";
+          if (selectedLanguage === "en") {
+            promptText = `Translate the following text to English: "${parsedAnalysis.text}"`;
+          } else if (selectedLanguage === "es") {
+            promptText = `Translate the following text to Spanish: "${parsedAnalysis.text}"`;
+          } else if (selectedLanguage === "ru") {
+            promptText = `Translate the following text to Russian: "${parsedAnalysis.text}"`;
+          }
+
+          try {
+            const response = await openai.chat.completions.create({
+              model: "gpt-4o-mini",
+              messages: [
+                {
+                  role: "user",
+                  content: promptText,
+                },
+              ],
+            });
+
+            const translatedText =
+              response.choices[0].message.content || "Translation failed";
+
+            // Create a hash for the translated text
+            const imageHash = await Crypto.digestStringAsync(
+              Crypto.CryptoDigestAlgorithm.SHA256,
+              `${imageUri}_${selectedLanguage}`
+            );
+
+            // Save the translation to cache
+            await saveAnalysisToStorage(imageUri, translatedText, imageHash);
+
+            setIsAnalyzing(false);
+            return translatedText;
+          } catch (error) {
+            console.error("Error translating text:", error);
+            setIsAnalyzing(false);
+            return `Error translating: ${error}`;
+          }
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Error loading analysis from storage:", error);
+      return null;
+    }
+  };
+
+  // Change language
+  const changeLanguage = async (language: Language) => {
+    if (language === selectedLanguage) {
+      // If the same language is selected, just close the menu
+      setIsLanguageMenuOpen(false);
+      return;
+    }
+
+    console.log(`Changing language from ${selectedLanguage} to ${language}`);
+    const previousLanguage = selectedLanguage;
+    setSelectedLanguage(language);
+    setIsLanguageMenuOpen(false);
+    await saveLanguagePreference(language);
+
+    // If there's an analysis, translate it instead of reanalyzing
+    if (selectedPhoto && aiAnalysis) {
+      console.log(
+        `Language changed to ${language}, translating existing analysis...`
+      );
+
+      // Translate the existing analysis instead of reanalyzing the image
+      await translateAnalysis(aiAnalysis, language);
+    }
+
+    // Start background translation of all cached analyses
+    translateAllCachedAnalyses(language);
+  };
 
   return (
     <View style={styles.container}>
@@ -650,6 +1077,48 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     fontWeight: "400",
+  },
+
+  languageSwitcherContainer: {
+    position: "relative",
+    zIndex: 10,
+  },
+  languageButton: {
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 5,
+  },
+  languageButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  languageMenu: {
+    position: "absolute",
+    top: 40,
+    left: 0,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+    padding: 5,
+    width: 150,
+    zIndex: 20,
+  },
+  languageOption: {
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 5,
+  },
+  selectedLanguageOption: {
+    backgroundColor: "#f0f0f0",
+  },
+  languageOptionText: {
+    fontSize: 14,
   },
 });
 
