@@ -8,6 +8,7 @@ import {
   Modal,
   Dimensions,
   SafeAreaView,
+  ScrollView,
 } from "react-native";
 import {
   CameraView,
@@ -219,7 +220,7 @@ const Detail = () => {
             style={styles.closeButton}
             onPress={closePhoto}
           >
-            <Text style={styles.closeButtonText}>@</Text>
+            <Text style={styles.closeButtonText}>←</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.analyzeButton}
@@ -252,7 +253,9 @@ const Detail = () => {
 
         {aiAnalysis && (
           <View style={styles.analysisContainer}>
-            <Text style={styles.analysisText}>{aiAnalysis}</Text>
+            <ScrollView style={styles.scrollView}>
+              <Text style={styles.analysisText}>{aiAnalysis}</Text>
+            </ScrollView>
           </View>
         )}
       </SafeAreaView>
@@ -312,15 +315,17 @@ const styles = StyleSheet.create({
   },
 
   closeButton: {
-    position: "absolute",
-    top: 40,
-    right: 20,
-    zIndex: 1,
+    backgroundColor: "#007AFF",
+    padding: 10,
+    borderRadius: 8,
+    minWidth: 50,
+    alignItems: "center",
   },
 
   closeButtonText: {
     color: "white",
-    fontSize: 36, // Fixed typo here
+    fontSize: 24,
+    fontWeight: "600",
   },
 
   header: {
@@ -372,7 +377,11 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: "rgba(0,0,0,0.8)",
     padding: 20,
-    maxHeight: "30%",
+    maxHeight: "40%",
+  },
+
+  scrollView: {
+    flexGrow: 0,
   },
 
   analysisText: {
