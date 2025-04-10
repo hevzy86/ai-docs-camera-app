@@ -24,6 +24,7 @@ import { useRouter } from "expo-router";
 import { useLocalSearchParams } from "expo-router";
 import OpenAI from "openai";
 import * as ImageManipulator from "expo-image-manipulator";
+import * as Crypto from "expo-crypto";
 
 import {
   useNavigation,
@@ -51,6 +52,7 @@ const Detail = () => {
   const [analysisStep, setAnalysisStep] = useState<string>("");
   const [isAnalysisCollapsed, setIsAnalysisCollapsed] = useState(false);
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
+  const scrollViewRef = useRef<ScrollView>(null);
 
   // Animation value for panel height
   const panelHeight = useRef(new Animated.Value(1)).current;
@@ -112,16 +114,72 @@ const Detail = () => {
     }
   }, []);
 
+  // Load saved analysis results from AsyncStorage
+  const loadAnalysisCache = useCallback(async () => {
+    try {
+      const savedAnalysis = await AsyncStorage.getItem("analysisCache");
+      if (savedAnalysis) {
+        const parsedCache = JSON.parse(savedAnalysis);
+        // Update the in-memory cache with saved results
+        analysisCache.current = { ...analysisCache.current, ...parsedCache };
+        console.log("Loaded analysis cache from storage");
+      }
+    } catch (error) {
+      console.error("Failed to load analysis cache", error);
+    }
+  }, []);
+
+  // Clear the analysis cache (for debugging)
+  const clearAnalysisCache = async () => {
+    try {
+      analysisCache.current = {};
+      await AsyncStorage.removeItem("analysisCache");
+      console.log("Analysis cache cleared");
+    } catch (error) {
+      console.error("Failed to clear analysis cache", error);
+    }
+  };
+
+  // Save analysis results to AsyncStorage
+  const saveAnalysisToStorage = async (
+    imageUri: string,
+    analysis: string,
+    imageHash: string
+  ) => {
+    try {
+      // First update the in-memory cache using the hash as the key
+      analysisCache.current[imageHash] = analysis;
+
+      // Then save to AsyncStorage
+      // We get the existing cache first to avoid overwriting other entries
+      const existingCache = await AsyncStorage.getItem("analysisCache");
+      const cacheToSave = existingCache
+        ? { ...JSON.parse(existingCache), [imageHash]: analysis }
+        : { [imageHash]: analysis };
+
+      await AsyncStorage.setItem("analysisCache", JSON.stringify(cacheToSave));
+      console.log(
+        "Saved analysis to persistent storage with hash:",
+        imageHash.substring(0, 10) + "..."
+      );
+    } catch (error) {
+      console.error("Failed to save analysis to storage", error);
+    }
+  };
+
   const loadSavedPhotos = useCallback(async () => {
     try {
       const savedPhotos = await AsyncStorage.getItem("capturedPhotos");
       if (savedPhotos) {
         setCapturedPhotos(JSON.parse(savedPhotos));
       }
+
+      // Load the analysis cache when loading photos
+      await loadAnalysisCache();
     } catch (error) {
       console.error("Failed to load photos", error);
     }
-  }, []);
+  }, [loadAnalysisCache]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () => {
@@ -131,34 +189,113 @@ const Detail = () => {
     return () => unsubscribe();
   }, [navigation, loadSavedPhotos]);
 
-  const openPhoto = (item: PhotoItem) => {
+  const openPhoto = async (item: PhotoItem) => {
+    // Clear any previous analysis when opening a new photo
+    setAiAnalysis(null);
     setSelectedPhoto(item);
+
+    // Don't clear cache when opening a photo so we can reuse previous analyses
+    // clearAnalysisCache();
+
+    // Try to load cached analysis immediately when opening a photo
+    try {
+      // Create a hash for this image
+      const imageHash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        item.uri
+      );
+
+      // Check in-memory cache first
+      if (analysisCache.current[imageHash]) {
+        console.log("Found analysis in memory cache when opening photo");
+        setAiAnalysis(analysisCache.current[imageHash]);
+        return;
+      }
+
+      // If not in memory, check AsyncStorage
+      const savedAnalysis = await AsyncStorage.getItem("analysisCache");
+      if (savedAnalysis) {
+        const parsedCache = JSON.parse(savedAnalysis);
+        if (parsedCache[imageHash]) {
+          console.log(
+            "Found analysis in persistent storage when opening photo"
+          );
+          // Update in-memory cache and set analysis
+          analysisCache.current[imageHash] = parsedCache[imageHash];
+          setAiAnalysis(parsedCache[imageHash]);
+          return;
+        }
+      }
+
+      // If we get here, there's no cached analysis for this photo
+      console.log("No cached analysis found for this photo");
+    } catch (error) {
+      console.error("Error checking cache when opening photo:", error);
+    }
   };
 
   const closePhoto = () => {
     setSelectedPhoto(null);
+    setAiAnalysis(null);
   };
 
   const analyzeImage = async (imageUri: string) => {
     try {
+      // Reset states
       setIsAnalyzing(true);
       setAiAnalysis(null);
 
-      // Check cache first
-      if (analysisCache.current[imageUri]) {
+      // Don't clear the cache to allow reusing previous analyses
+      // await clearAnalysisCache();
+
+      console.log(
+        "Analyzing image with URI:",
+        imageUri.substring(0, 30) + "..."
+      );
+
+      // Create a unique hash for this image based on the original URI
+      const imageHash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        imageUri // Use the original URI, not the optimized one
+      );
+
+      console.log("Generated image hash:", imageHash.substring(0, 10) + "...");
+      console.log("Checking cache for existing analysis...");
+
+      // Check in-memory cache first using the hash
+      if (analysisCache.current[imageHash]) {
         setAnalysisStep("Loading from cache...");
+        console.log("Found analysis in memory cache");
         setTimeout(() => {
-          setAiAnalysis(analysisCache.current[imageUri]);
+          setAiAnalysis(analysisCache.current[imageHash]);
           setIsAnalyzing(false);
         }, 500); // Small delay to show loading from cache
-        return analysisCache.current[imageUri];
+        return analysisCache.current[imageHash];
       }
 
-      if (!process.env.EXPO_PUBLIC_OPENAI_API_KEY) {
-        throw new Error("OpenAI API key is not configured");
+      // If not in memory, check AsyncStorage
+      setAnalysisStep("Checking storage...");
+      try {
+        const savedAnalysis = await AsyncStorage.getItem("analysisCache");
+        if (savedAnalysis) {
+          const parsedCache = JSON.parse(savedAnalysis);
+          if (parsedCache[imageHash]) {
+            // Found in AsyncStorage, update in-memory cache and return
+            console.log("Found analysis in persistent storage");
+            analysisCache.current[imageHash] = parsedCache[imageHash];
+            setAiAnalysis(parsedCache[imageHash]);
+            setIsAnalyzing(false);
+            return parsedCache[imageHash];
+          }
+        }
+      } catch (error) {
+        console.error("Error checking AsyncStorage:", error);
+        // Continue with API call if storage check fails
       }
 
-      // Resize and compress the image
+      console.log("No cached analysis found, calling OpenAI API...");
+
+      // Resize and compress the image first
       setAnalysisStep("Optimizing image...");
       const optimizedImage = await ImageManipulator.manipulateAsync(
         imageUri,
@@ -166,14 +303,18 @@ const Detail = () => {
         { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
       );
 
+      if (!process.env.EXPO_PUBLIC_OPENAI_API_KEY) {
+        throw new Error("OpenAI API key is not configured");
+      }
+
       // First, fetch the optimized image
       setAnalysisStep("Processing image...");
       const response = await fetch(optimizedImage.uri);
       const blob = await response.blob();
 
       // Convert blob to base64
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
+      const reader = new FileReader();
+      return new Promise<string>((resolve, reject) => {
         reader.onload = async () => {
           try {
             const base64data = reader.result as string;
@@ -207,11 +348,12 @@ const Detail = () => {
 
             console.log("Received response from OpenAI"); // Debug log
             setAnalysisStep("Analysis complete!");
+
             const analysisResult =
               response.choices[0].message.content || "No analysis available";
 
-            // Cache the result
-            analysisCache.current[imageUri] = analysisResult;
+            // Re-enable caching to save analyses for future use
+            await saveAnalysisToStorage(imageUri, analysisResult, imageHash);
 
             setAiAnalysis(analysisResult);
             resolve(analysisResult);
@@ -306,28 +448,30 @@ const Detail = () => {
               {
                 maxHeight: panelHeight.interpolate({
                   inputRange: [0, 1],
-                  outputRange: ["8%", "40%"],
+                  outputRange: ["8%", "60%"],
                 }),
               },
             ]}
-            {...panResponder.panHandlers}
           >
             <TouchableOpacity
               style={styles.handleContainer}
               onPress={togglePanel}
               activeOpacity={0.7}
+              {...panResponder.panHandlers}
             >
               <View style={styles.handle} />
             </TouchableOpacity>
 
-            <ScrollView
-              style={[
-                styles.scrollView,
-                isAnalysisCollapsed ? styles.hidden : null,
-              ]}
-            >
-              <Text style={styles.analysisText}>{aiAnalysis}</Text>
-            </ScrollView>
+            {!isAnalysisCollapsed && (
+              <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={styles.scrollViewContent}
+                showsVerticalScrollIndicator={true}
+                bounces={true}
+              >
+                <Text style={styles.analysisText}>{aiAnalysis}</Text>
+              </ScrollView>
+            )}
           </Animated.View>
         )}
       </SafeAreaView>
@@ -468,12 +612,13 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.3)",
   },
 
-  hidden: {
-    display: "none",
-  },
-
   scrollView: {
     flexGrow: 0,
+    marginBottom: 10,
+  },
+
+  scrollViewContent: {
+    paddingBottom: 20,
   },
 
   analysisText: {
@@ -481,7 +626,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     fontWeight: "400",
-    paddingBottom: 20,
   },
 });
 
