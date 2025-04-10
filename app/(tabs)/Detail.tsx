@@ -67,6 +67,9 @@ const Detail = () => {
   const [isAnalysisCollapsed, setIsAnalysisCollapsed] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<Language>("en");
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const scrollViewRef = useRef<ScrollView>(null);
   const params = useLocalSearchParams();
@@ -680,51 +683,171 @@ const Detail = () => {
     }
   };
 
-  const renderItem = ({ item }: { item: PhotoItem }) => (
-    <TouchableOpacity
-      style={styles.item}
-      onPress={() => openPhoto(item)}
-    >
-      <Image
-        source={{ uri: item.uri }}
-        style={styles.photo}
-      />
-    </TouchableOpacity>
-  );
+  // Toggle selection mode
+  const toggleSelectionMode = () => {
+    setIsSelectionMode(!isSelectionMode);
+    if (isSelectionMode) {
+      // Clear selections when exiting selection mode
+      setSelectedPhotos(new Set());
+    }
+  };
 
-  const renderLanguageSwitcher = () => (
-    <View style={styles.languageSwitcherContainer}>
+  // Toggle photo selection
+  const togglePhotoSelection = (uri: string) => {
+    const newSelectedPhotos = new Set(selectedPhotos);
+    if (newSelectedPhotos.has(uri)) {
+      newSelectedPhotos.delete(uri);
+    } else {
+      newSelectedPhotos.add(uri);
+    }
+    setSelectedPhotos(newSelectedPhotos);
+  };
+
+  // Delete selected photos
+  const deleteSelectedPhotos = async () => {
+    try {
+      // Filter out the selected photos
+      const remainingPhotos = capturedPhotos.filter(
+        (photo) => !selectedPhotos.has(photo.uri)
+      );
+
+      // Update state
+      setCapturedPhotos(remainingPhotos);
+
+      // Save to storage
+      await AsyncStorage.setItem(
+        "capturedPhotos",
+        JSON.stringify(remainingPhotos)
+      );
+
+      // Clear selections and exit selection mode
+      setSelectedPhotos(new Set());
+      setIsSelectionMode(false);
+      setShowDeleteConfirmation(false);
+
+      // Also delete analysis cache for these photos
+      for (const uri of selectedPhotos) {
+        // Get all keys from AsyncStorage
+        const keys = await AsyncStorage.getAllKeys();
+
+        // Find and delete all analysis entries for this photo
+        const keysToRemove = keys.filter(
+          (key) =>
+            key.startsWith(`analysis_${uri}`) ||
+            (key === "analysisCache" && analysisCache.current)
+        );
+
+        if (keysToRemove.includes("analysisCache") && analysisCache.current) {
+          // For the global cache, we need to remove just the entries for these photos
+          const existingCache = await AsyncStorage.getItem("analysisCache");
+          if (existingCache) {
+            const parsedCache = JSON.parse(existingCache);
+
+            // Find and remove all entries for this photo
+            Object.keys(parsedCache).forEach((key) => {
+              if (key.includes(uri)) {
+                delete parsedCache[key];
+              }
+            });
+
+            // Save the updated cache
+            await AsyncStorage.setItem(
+              "analysisCache",
+              JSON.stringify(parsedCache)
+            );
+
+            // Update in-memory cache
+            Object.keys(analysisCache.current).forEach((key) => {
+              if (key.includes(uri)) {
+                delete analysisCache.current[key];
+              }
+            });
+          }
+        } else if (keysToRemove.length > 0) {
+          // Remove individual analysis entries
+          await AsyncStorage.multiRemove(keysToRemove);
+        }
+      }
+
+      console.log(`Deleted ${selectedPhotos.size} photos and their analyses`);
+    } catch (error) {
+      console.error("Error deleting photos:", error);
+    }
+  };
+
+  const renderItem = ({ item }: { item: PhotoItem }) => {
+    const isSelected = selectedPhotos.has(item.uri);
+
+    return (
       <TouchableOpacity
-        style={styles.languageButton}
-        onPress={() => setIsLanguageMenuOpen(!isLanguageMenuOpen)}
+        style={[styles.item, isSelected && styles.selectedItem]}
+        onPress={() => {
+          if (isSelectionMode) {
+            togglePhotoSelection(item.uri);
+          } else {
+            openPhoto(item);
+          }
+        }}
+        onLongPress={() => {
+          if (!isSelectionMode) {
+            setIsSelectionMode(true);
+            togglePhotoSelection(item.uri);
+          }
+        }}
       >
-        <Text style={styles.languageButtonText}>
-          {languages.find((lang) => lang.code === selectedLanguage)?.flag}{" "}
-          {selectedLanguage.toUpperCase()}
-        </Text>
+        <Image
+          source={{ uri: item.uri }}
+          style={styles.photo}
+        />
+        {isSelectionMode && (
+          <View style={styles.selectionOverlay}>
+            {isSelected && (
+              <View style={styles.checkmark}>
+                <Text style={styles.checkmarkText}>✓</Text>
+              </View>
+            )}
+          </View>
+        )}
       </TouchableOpacity>
+    );
+  };
 
-      {isLanguageMenuOpen && (
-        <View style={styles.languageMenu}>
-          {languages.map((language) => (
-            <TouchableOpacity
-              key={language.code}
-              style={[
-                styles.languageOption,
-                selectedLanguage === language.code &&
-                  styles.selectedLanguageOption,
-              ]}
-              onPress={() => changeLanguage(language.code)}
-            >
-              <Text style={styles.languageOptionText}>
-                {language.flag} {language.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+  // Render delete confirmation modal
+  const renderDeleteConfirmation = () => {
+    return (
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showDeleteConfirmation}
+        onRequestClose={() => setShowDeleteConfirmation(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmationDialog}>
+            <Text style={styles.confirmationTitle}>Delete Photos</Text>
+            <Text style={styles.confirmationText}>
+              Are you sure you want to delete {selectedPhotos.size} selected
+              photo{selectedPhotos.size !== 1 ? "s" : ""}? This action cannot be
+              undone.
+            </Text>
+            <View style={styles.confirmationButtons}>
+              <TouchableOpacity
+                style={[styles.confirmationButton, styles.cancelButton]}
+                onPress={() => setShowDeleteConfirmation(false)}
+              >
+                <Text style={styles.confirmationButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmationButton, styles.deleteButton]}
+                onPress={deleteSelectedPhotos}
+              >
+                <Text style={styles.confirmationButtonText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-      )}
-    </View>
-  );
+      </Modal>
+    );
+  };
 
   const renderFullScreenPhoto = () => (
     <Modal
@@ -929,19 +1052,80 @@ const Detail = () => {
     translateAllCachedAnalyses(language);
   };
 
+  const renderLanguageSwitcher = () => (
+    <View style={styles.languageSwitcherContainer}>
+      <TouchableOpacity
+        style={styles.languageButton}
+        onPress={() => setIsLanguageMenuOpen(!isLanguageMenuOpen)}
+      >
+        <Text style={styles.languageButtonText}>
+          {languages.find((lang) => lang.code === selectedLanguage)?.flag}{" "}
+          {selectedLanguage.toUpperCase()}
+        </Text>
+      </TouchableOpacity>
+
+      {isLanguageMenuOpen && (
+        <View style={styles.languageMenu}>
+          {languages.map((language) => (
+            <TouchableOpacity
+              key={language.code}
+              style={[
+                styles.languageOption,
+                selectedLanguage === language.code &&
+                  styles.selectedLanguageOption,
+              ]}
+              onPress={() => changeLanguage(language.code)}
+            >
+              <Text style={styles.languageOptionText}>
+                {language.flag} {language.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       {capturedPhotos.length > 0 ? (
-        <FlatList
-          data={capturedPhotos}
-          renderItem={renderItem}
-          keyExtractor={(item, index) => index.toString()}
-          numColumns={3}
-        />
+        <>
+          <View style={styles.selectButtonContainer}>
+            <TouchableOpacity
+              style={styles.topRightSelectButton}
+              onPress={toggleSelectionMode}
+            >
+              <Text style={styles.subtleButtonText}>
+                {isSelectionMode ? "Cancel" : "Select"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {isSelectionMode && selectedPhotos.size > 0 && (
+            <View style={styles.deleteButtonContainer}>
+              <TouchableOpacity
+                style={styles.subtleDeleteButton}
+                onPress={() => setShowDeleteConfirmation(true)}
+              >
+                <Text style={styles.subtleButtonText}>
+                  Delete ({selectedPhotos.size})
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <FlatList
+            data={capturedPhotos}
+            renderItem={renderItem}
+            keyExtractor={(item, index) => index.toString()}
+            numColumns={3}
+          />
+        </>
       ) : (
         <Text style={styles.noPhotosText}>No photos captured yet.</Text>
       )}
       {renderFullScreenPhoto()}
+      {renderDeleteConfirmation()}
     </View>
   );
 };
@@ -953,9 +1137,10 @@ const styles = StyleSheet.create({
   },
 
   item: {
-    width: itemSize, // Make sure itemSize is defined
-    height: itemSize, // Ensure itemSize is defined
+    width: itemSize,
+    height: itemSize,
     padding: 2,
+    position: "relative",
   },
 
   photo: {
@@ -963,10 +1148,140 @@ const styles = StyleSheet.create({
     height: "100%",
   },
 
-  noPhotosText: {
+  selectedItem: {
+    opacity: 0.7,
+  },
+
+  selectionOverlay: {
+    position: "absolute",
+    top: 2,
+    left: 2,
+    right: 2,
+    bottom: 2,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    borderWidth: 2,
+    borderColor: "#007AFF",
+  },
+
+  checkmark: {
+    position: "absolute",
+    top: 5,
+    right: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#007AFF",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  checkmarkText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+
+  subtleHeader: {
+    display: "none", // Hide the old header
+  },
+
+  topBar: {
+    display: "none", // Hide the custom top bar
+  },
+
+  topBarTitle: {
+    display: "none", // Hide the title
+  },
+
+  selectButtonContainer: {
+    position: "absolute",
+    top: 10, // Position at the very top
+    right: 10,
+    zIndex: 100, // Ensure it's above everything
+  },
+
+  topRightSelectButton: {
+    backgroundColor: "rgba(0, 122, 255, 0.8)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+  },
+
+  deleteButtonContainer: {
+    position: "absolute",
+    top: 10, // Same height as select button
+    right: 90, // Position to the left of select button
+    zIndex: 10,
+  },
+
+  subtleDeleteButton: {
+    backgroundColor: "rgba(255, 59, 48, 0.8)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  confirmationDialog: {
+    width: "80%",
+    backgroundColor: "white",
+    borderRadius: 10,
+    padding: 20,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+
+  confirmationTitle: {
     fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 15,
+  },
+
+  confirmationText: {
+    fontSize: 16,
     textAlign: "center",
-    marginTop: 50,
+    marginBottom: 20,
+  },
+
+  confirmationButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+  },
+
+  confirmationButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 5,
+    width: "45%",
+    alignItems: "center",
+  },
+
+  cancelButton: {
+    backgroundColor: "#E0E0E0",
+  },
+
+  deleteButton: {
+    backgroundColor: "#FF3B30",
+  },
+
+  confirmationButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "white",
   },
 
   fullScreenContainer: {
@@ -977,8 +1292,8 @@ const styles = StyleSheet.create({
   },
 
   fullScreenPhoto: {
-    width: "100%", // Make sure the photo takes the full width
-    height: "100%", // Make sure the photo takes the full height
+    width: "100%",
+    height: "100%",
   },
 
   closeButton: {
@@ -1042,7 +1357,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "rgba(28,28,30,0.92)", // More Apple-like dark color
+    backgroundColor: "rgba(28,28,30,0.92)",
     borderTopLeftRadius: 14,
     borderTopRightRadius: 14,
     overflow: "hidden",
