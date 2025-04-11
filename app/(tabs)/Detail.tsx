@@ -645,7 +645,19 @@ const Detail = () => {
             console.log("Sending request to OpenAI..."); // Debug log
 
             let promptText =
-              "Describe this image in general terms. If there are people, describe the scene generally without identifying individuals.";
+              "Please analyze this image and provide a description based on what you see:\n\n" +
+              "If this is a document (like an invoice, certificate, ID, etc.):\n" +
+              "1. **Document Type and Purpose**\n" +
+              "   - Identify the type and purpose of the document\n\n" +
+              "2. **Key Information**\n" +
+              "   - Extract important dates, numbers, amounts, and other key details\n\n" +
+              "3. **Additional Information**\n" +
+              "   - Note any other relevant details\n\n" +
+              "If this is NOT a document (like a person, scene, object, etc.):\n" +
+              "- Provide a general description of what you see\n" +
+              "- Describe the scene, setting, or context\n" +
+              "- Note any interesting features or elements\n\n" +
+              "Important: Maintain privacy by not identifying specific individuals by name. Provide the analysis in the selected language.";
 
             // Add language instruction based on selected language
             console.log("Setting prompt for language:", selectedLanguage);
@@ -653,11 +665,35 @@ const Detail = () => {
             if (selectedLanguage === "es") {
               console.log("Using Spanish prompt");
               promptText =
-                "Describe esta imagen en términos generales. Si hay personas, describe la escena en general sin identificar a las personas. Responde completamente en español.";
+                "Por favor, analiza esta imagen y proporciona una descripción basada en lo que ves:\n\n" +
+                "Si es un documento (como una factura, certificado, identificación, etc.):\n" +
+                "1. **Tipo y Propósito del Documento**\n" +
+                "   - Identifica el tipo y propósito del documento\n\n" +
+                "2. **Información Clave**\n" +
+                "   - Extrae fechas importantes, números, cantidades y otros detalles clave\n\n" +
+                "3. **Información Adicional**\n" +
+                "   - Anota cualquier otro detalle relevante\n\n" +
+                "Si NO es un documento (como una persona, escena, objeto, etc.):\n" +
+                "- Proporciona una descripción general de lo que ves\n" +
+                "- Describe la escena, entorno o contexto\n" +
+                "- Señala cualquier característica o elemento interesante\n\n" +
+                "Importante: Mantén la privacidad sin identificar a personas específicas por su nombre. Responde completamente en español.";
             } else if (selectedLanguage === "ru") {
               console.log("Using Russian prompt");
               promptText =
-                "Опишите это изображение в общих чертах. Если на нем есть люди, опишите сцену в целом, не идентифицируя людей. Ответьте полностью на русском языке.";
+                "Пожалуйста, проанализируйте это изображение и предоставьте описание на основе того, что вы видите:\n\n" +
+                "Если это документ (например, счет, сертификат, удостоверение личности и т.д.):\n" +
+                "1. **Тип и назначение документa**\n" +
+                "   - Определите тип и назначение документa\n\n" +
+                "2. **Ключевая информация**\n" +
+                "   - Извлеките важные даты, номера, суммы и другие ключевые детали\n\n" +
+                "3. **Дополнительная информация**\n" +
+                "   - Отметьте любые другие соответствующие детали\n\n" +
+                "Если это НЕ документ (например, человек, сцена, объект и т.д.):\n" +
+                "- Предоставьте общее описание того, что вы видите\n" +
+                "- Опишите сцену, обстановку или контекст\n" +
+                "- Отметьте любые интересные особенности или элементы\n\n" +
+                "Важно: Сохраняйте конфиденциальность, не идентифицируя конкретных лиц по имени. Ответьте полностью на русском языке.";
             } else {
               console.log("Using English prompt");
             }
@@ -902,100 +938,95 @@ const Detail = () => {
     );
   };
 
-const renderFullScreenPhoto = () => (
-  <Modal
-    visible={selectedPhoto !== null}
-    transparent={false}
-    animationType="fade"
-  >
-    <SafeAreaView style={styles.fullScreenContainer}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={closePhoto}
-        >
-          <Text style={styles.closeButtonText}>←</Text>
-        </TouchableOpacity>
-
-        {renderLanguageSwitcher()}
-
-        <TouchableOpacity
-          style={styles.analyzeButton}
-          onPress={() => selectedPhoto && analyzeImage(selectedPhoto.uri)}
-          disabled={isAnalyzing}
-        >
-          <Text style={styles.analyzeButtonText}>
-            {isAnalyzing ? (
-              <ActivityIndicator
-                size="small"
-                color="#fff"
-              />
-            ) : (
-              "Analyze Image"
-            )}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <Image
-        source={{ uri: selectedPhoto?.uri }}
-        style={styles.fullScreenPhoto}
-        resizeMode="contain"
-      />
-
-      {isAnalyzing && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator
-            size="large"
-            color="#ffffff"
-          />
-          <Text style={styles.loadingText}>
-            {analysisStep || "Analyzing image..."}
-          </Text>
-        </View>
-      )}
-
-      {aiAnalysis && (
-        <Animated.View
-          style={[
-            styles.analysisContainer,
-            {
-              maxHeight: panelHeight.interpolate({
-                inputRange: [0, 1],
-                outputRange: ["8%", "60%"],
-              }),
-            },
-          ]}
-        >
+  const renderFullScreenPhoto = () => (
+    <Modal
+      visible={selectedPhoto !== null}
+      transparent={false}
+      animationType="fade"
+    >
+      <SafeAreaView style={styles.fullScreenContainer}>
+        <View style={styles.header}>
           <TouchableOpacity
-            style={styles.handleContainer}
-            onPress={togglePanel}
-            activeOpacity={0.7}
-            {...panResponder.panHandlers}
+            style={styles.closeButton}
+            onPress={closePhoto}
           >
-            <View style={styles.handle} />
+            <Text style={styles.closeButtonText}>←</Text>
           </TouchableOpacity>
 
-          {!isAnalysisCollapsed && (
-            <ScrollView
-              style={styles.scrollView}
-              contentContainerStyle={styles.scrollViewContent}
-              showsVerticalScrollIndicator={true}
-              bounces={true}
+          {renderLanguageSwitcher()}
+
+          <TouchableOpacity
+            style={styles.analyzeButton}
+            onPress={() => selectedPhoto && analyzeImage(selectedPhoto.uri)}
+            disabled={isAnalyzing}
+          >
+            <Text style={styles.analyzeButtonText}>
+              {isAnalyzing ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#fff"
+                />
+              ) : (
+                "Analyze Image"
+              )}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <Image
+          source={{ uri: selectedPhoto?.uri }}
+          style={styles.fullScreenPhoto}
+          resizeMode="contain"
+        />
+
+        {isAnalyzing && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator
+              size="large"
+              color="#ffffff"
+            />
+            <Text style={styles.loadingText}>
+              {analysisStep || "Analyzing image..."}
+            </Text>
+          </View>
+        )}
+
+        {aiAnalysis && (
+          <Animated.View
+            style={[
+              styles.analysisContainer,
+              {
+                maxHeight: panelHeight.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ["8%", "60%"],
+                }),
+              },
+            ]}
+          >
+            <TouchableOpacity
+              style={styles.handleContainer}
+              onPress={togglePanel}
+              activeOpacity={0.7}
+              {...panResponder.panHandlers}
             >
-              <Text style={styles.analysisText}>{aiAnalysis}</Text>
-            </ScrollView>
-          )}
-        </Animated.View>
-      )}
-    </SafeAreaView>
-  </Modal>
-);
+              <View style={styles.handle} />
+            </TouchableOpacity>
 
-
-
-
-
+            {!isAnalysisCollapsed && (
+              <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={styles.scrollViewContent}
+                showsVerticalScrollIndicator={true}
+                bounces={true}
+              >
+                <Text style={styles.analysisText}>{aiAnalysis}</Text>
+              </ScrollView>
+            )}
+          </Animated.View>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
 
   // Load analysis from storage
   const loadAnalysisFromStorage = async (imageUri: string) => {
