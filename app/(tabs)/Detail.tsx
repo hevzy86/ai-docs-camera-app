@@ -589,10 +589,20 @@ const Detail = () => {
       }
 
       // If no cached analysis, perform a new analysis
+      setAnalysisStep("Optimizing image...");
+
+      // Compress and resize the image for faster upload
+      const manipResult = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [{ resize: { width: 800 } }], // Resize to 800px width
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG } // Compress to 70% quality
+      );
+      
+      console.log(`Optimized image size: ${manipResult.width}x${manipResult.height}`);
       setAnalysisStep("Loading image...");
 
-      // Load the image and convert to base64
-      const response = await fetch(imageUri);
+      // Load the optimized image and convert to base64
+      const response = await fetch(manipResult.uri);
       const blob = await response.blob();
 
       return new Promise((resolve, reject) => {
@@ -605,6 +615,13 @@ const Detail = () => {
 
             setAnalysisStep("Sending to AI for analysis...");
             console.log("Sending request to OpenAI..."); // Debug log
+            
+            // Start a timeout to show progress updates to the user
+            let dots = 0;
+            const progressInterval = setInterval(() => {
+              dots = (dots + 1) % 4;
+              setAnalysisStep(`Analyzing image${'.'.repeat(dots)}`);
+            }, 800);
 
             let promptText =
               "Please analyze this image and provide a description based on what you see:\n\n" +
@@ -655,7 +672,7 @@ const Detail = () => {
             }
 
             const response = await openai.chat.completions.create({
-              model: "gpt-4o-mini",
+              model: "gpt-4o-mini", // Use the mini model for faster responses
               messages: [
                 {
                   role: "user",
@@ -673,8 +690,12 @@ const Detail = () => {
                   ],
                 },
               ],
+              max_tokens: 500, // Limit response length for faster generation
             });
 
+            // Clear the progress interval
+            clearInterval(progressInterval);
+            
             console.log("Received response from OpenAI"); // Debug log
             setAnalysisStep("Analysis complete!");
 
