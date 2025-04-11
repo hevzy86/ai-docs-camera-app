@@ -45,19 +45,35 @@ export default function CameraTab() {
   const savePhoto = useCallback(
     async (newPhoto: { uri: string }) => {
       try {
-        const updatedPhotos = [newPhoto, ...capturedPhotos];
+        console.log(`Saving new photo: ${newPhoto.uri.substring(0, 30)}...`);
+        
+        // First load the latest photos from storage to ensure we have the most up-to-date list
+        const savedPhotos = await AsyncStorage.getItem("capturedPhotos");
+        let currentPhotos = [];
+        
+        if (savedPhotos) {
+          currentPhotos = JSON.parse(savedPhotos);
+          console.log(`Loaded ${currentPhotos.length} existing photos from storage`);
+        }
+        
+        // Add the new photo to the beginning of the array
+        const updatedPhotos = [newPhoto, ...currentPhotos];
+        console.log(`Total photos after adding new one: ${updatedPhotos.length}`);
 
+        // Save to AsyncStorage
         await AsyncStorage.setItem(
           "capturedPhotos",
           JSON.stringify(updatedPhotos)
         );
 
+        // Update state with the new array
         setCapturedPhotos(updatedPhotos);
+        console.log("Photo saved successfully");
       } catch (error) {
         console.error("Failed to save photo", error);
       }
     },
-    [capturedPhotos]
+    [] // Remove capturedPhotos from dependency array to avoid stale state
   );
 
   const toggleCameraFacing = useCallback(() => {
@@ -93,11 +109,18 @@ export default function CameraTab() {
 
   const analyzeLastPhoto = useCallback(() => {
     if (lastCapturedPhoto) {
-      // Navigate to the detail screen with a query parameter to indicate immediate analysis
+      console.log(`Navigating to Detail screen with photo: ${lastCapturedPhoto.uri.substring(0, 30)}...`);
+      
+      // Navigate to the detail screen with query parameters to indicate immediate analysis
+      // and include the URI of the photo to analyze
       router.push({
         pathname: "/Detail",
-        params: { analyzeImmediately: "true" },
+        params: { 
+          analyzeImmediately: "true",
+          photoUri: lastCapturedPhoto.uri 
+        },
       });
+      
       // Clear the last captured photo state
       setLastCapturedPhoto(null);
     }

@@ -68,7 +68,7 @@ const Detail = () => {
   const [selectedLanguage, setSelectedLanguage] = useState<Language>("en");
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
+  const [selectedPhotos, setSelectedPhotos] = useState<Set<PhotoItem>>(new Set());
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -78,138 +78,172 @@ const Detail = () => {
   // Animation value for panel height
   const panelHeight = useRef(new Animated.Value(1)).current;
 
-  // Simple cache for image analysis results
-  const analysisCache = useRef<Record<string, string>>({});
-
-  // Configure pan responder for swipe gestures
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderMove: (_, gestureState) => {
-        // Only respond to downward and upward swipes
-        if (Math.abs(gestureState.dy) > Math.abs(gestureState.dx)) {
-          if (gestureState.dy > 20 && !isAnalysisCollapsed) {
-            // Swipe down - collapse
-            setIsAnalysisCollapsed(true);
-            Animated.timing(panelHeight, {
-              toValue: 0,
-              duration: 200,
-              useNativeDriver: false,
-            }).start();
-          } else if (gestureState.dy < -20 && isAnalysisCollapsed) {
-            // Swipe up - expand
-            setIsAnalysisCollapsed(false);
-            Animated.timing(panelHeight, {
-              toValue: 1,
-              duration: 200,
-              useNativeDriver: false,
-            }).start();
-          }
-        }
-      },
-      onPanResponderRelease: () => {
-        // Optional: Add bounce-back animation if needed
-      },
-    })
-  ).current;
-
-  // Toggle panel with animation
-  const togglePanel = () => {
-    setIsAnalysisCollapsed(!isAnalysisCollapsed);
-    Animated.timing(panelHeight, {
-      toValue: isAnalysisCollapsed ? 1 : 0,
-      duration: 200,
-      useNativeDriver: false,
-    }).start();
+  // Storage keys for AsyncStorage
+  const STORAGE_KEYS = {
+    PHOTOS: "capturedPhotos", // Use a simple key for photos
+    ANALYSES: "analyses",     // Use a simple key for analyses
+    LANGUAGE: "selectedLanguage"
   };
 
-  // Add API key check
-  useEffect(() => {
-    if (!process.env.EXPO_PUBLIC_OPENAI_API_KEY) {
-      console.error("OpenAI API key is not set!");
-      setAiAnalysis(
-        "Error: OpenAI API key is not configured. Please check your environment variables."
-      );
-    } else {
-      console.log("OpenAI API key is configured");
-    }
-  }, []);
-
-  // Load saved analysis results from AsyncStorage
-  const loadAnalysisCache = useCallback(async () => {
+  // Load saved photos
+  const loadSavedPhotos = useCallback(async () => {
     try {
-      const savedAnalysis = await AsyncStorage.getItem("analysisCache");
-      if (savedAnalysis) {
-        const parsedCache = JSON.parse(savedAnalysis);
-        // Update the in-memory cache with saved results
-        analysisCache.current = { ...analysisCache.current, ...parsedCache };
-        console.log("Loaded analysis cache from storage");
+      // Get the latest photos from storage
+      console.log("Fetching photos from storage...");
+      const savedPhotos = await AsyncStorage.getItem(STORAGE_KEYS.PHOTOS);
+      
+      if (!savedPhotos) {
+        console.log("No photos found in storage");
+        // If no photos in storage, make sure state is empty
+        setCapturedPhotos([]);
+        return;
+      }
+      
+      const photosArray = JSON.parse(savedPhotos);
+      console.log(`Found ${photosArray.length} photos in storage`);
+      
+      // ALWAYS use photos from storage to ensure consistency
+      // This prevents deleted photos from reappearing
+      setCapturedPhotos(photosArray);
+      console.log(`Updated state with ${photosArray.length} photos from storage`);
+
+      // Load language preference
+      await loadLanguagePreference();
+    } catch (error) {
+      console.error("Failed to load photos", error);
+    }
+  }, []);  // Remove capturedPhotos from dependency array to avoid stale state
+
+  // Save photos to storage
+  const savePhotosToStorage = async (photos: PhotoItem[]) => {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.PHOTOS, JSON.stringify(photos));
+      console.log(`Saved ${photos.length} photos to storage`);
+    } catch (error) {
+      console.error("Failed to save photos to storage", error);
+    }
+  };
+
+  // Load analysis for a specific photo
+  const loadAnalysisForPhoto = async (photoUri: string): Promise<string | null> => {
+    try {
+      // Get all analyses from storage
+      const savedAnalyses = await AsyncStorage.getItem(STORAGE_KEYS.ANALYSES);
+      if (!savedAnalyses) {
+        return null;
+      }
+
+      const analyses = JSON.parse(savedAnalyses);
+      
+      // Check if we have an analysis for this photo in the current language
+      const key = `${photoUri}_${selectedLanguage}`;
+      if (analyses[key]) {
+        console.log(`Found analysis for photo in ${selectedLanguage}`);
+        return analyses[key];
+      }
+      
+      // If not found in current language, check if we have it in any language
+      // This allows fallback to any available analysis
+      const fallbackKey = Object.keys(analyses).find(k => k.startsWith(photoUri));
+      if (fallbackKey) {
+        console.log(`Found analysis in different language, will need translation`);
+        return analyses[fallbackKey];
+      }
+      
+      return null;
+    } catch (error) {
+      console.error("Error loading analysis for photo:", error);
+      return null;
+    }
+  };
+
+  // Save analysis for a specific photo
+  const saveAnalysisForPhoto = async (photoUri: string, analysis: string) => {
+    try {
+      // Get existing analyses
+      const savedAnalyses = await AsyncStorage.getItem(STORAGE_KEYS.ANALYSES);
+      const analyses = savedAnalyses ? JSON.parse(savedAnalyses) : {};
+      
+      // Add or update the analysis for this photo in the current language
+      const key = `${photoUri}_${selectedLanguage}`;
+      analyses[key] = analysis;
+      
+      // Save back to storage
+      await AsyncStorage.setItem(STORAGE_KEYS.ANALYSES, JSON.stringify(analyses));
+      console.log(`Saved analysis for photo in ${selectedLanguage}`);
+    } catch (error) {
+      console.error("Error saving analysis for photo:", error);
+    }
+  };
+
+  // Delete analyses for a specific photo (all languages)
+  const deleteAnalysesForPhoto = async (photoUri: string) => {
+    try {
+      // Get existing analyses
+      const savedAnalyses = await AsyncStorage.getItem(STORAGE_KEYS.ANALYSES);
+      if (!savedAnalyses) {
+        return;
+      }
+      
+      const analyses = JSON.parse(savedAnalyses);
+      
+      // Find and remove all analyses for this photo (in any language)
+      const keysToDelete = Object.keys(analyses).filter(key => key.startsWith(photoUri));
+      
+      if (keysToDelete.length > 0) {
+        keysToDelete.forEach(key => {
+          delete analyses[key];
+        });
+        
+        // Save back to storage
+        await AsyncStorage.setItem(STORAGE_KEYS.ANALYSES, JSON.stringify(analyses));
+        console.log(`Deleted ${keysToDelete.length} analyses for photo`);
       }
     } catch (error) {
-      console.error("Failed to load analysis cache", error);
-    }
-  }, []);
-
-  // Clear the analysis cache (for debugging)
-  const clearAnalysisCache = async () => {
-    try {
-      analysisCache.current = {};
-      await AsyncStorage.removeItem("analysisCache");
-      console.log("Analysis cache cleared");
-    } catch (error) {
-      console.error("Failed to clear analysis cache", error);
+      console.error("Error deleting analyses for photo:", error);
     }
   };
 
-  // Save analysis results to AsyncStorage
-  const saveAnalysisToStorage = async (
-    imageUri: string,
-    analysis: string,
-    imageHash: string
-  ) => {
+  // Delete selected photos
+  const deleteSelectedPhotos = async () => {
     try {
-      // First update the in-memory cache using the hash as the key
-      analysisCache.current[imageHash] = analysis;
-
-      // Then save to AsyncStorage
-      // We get the existing cache first to avoid overwriting other entries
-      const existingCache = await AsyncStorage.getItem("analysisCache");
-      const cacheToSave = existingCache
-        ? { ...JSON.parse(existingCache), [imageHash]: analysis }
-        : { [imageHash]: analysis };
-
-      await AsyncStorage.setItem("analysisCache", JSON.stringify(cacheToSave));
-      console.log(
-        "Saved analysis to persistent storage with hash:",
-        imageHash.substring(0, 10) + "..."
+      console.log(`Deleting ${selectedPhotos.size} photos`);
+      
+      // Create a new array without the selected photos
+      const updatedPhotos = capturedPhotos.filter(
+        (photo) => !selectedPhotos.has(photo)
       );
-
-      // Also save with language information for the new translation system
-      const analysisData = {
-        text: analysis,
-        timestamp: new Date().toISOString(),
-        language: selectedLanguage,
-      };
-
-      await AsyncStorage.setItem(
-        `analysis_${imageUri}_${selectedLanguage}`,
-        JSON.stringify(analysisData)
-      );
-      console.log(
-        `Saved analysis for ${imageUri.substring(
-          0,
-          20
-        )}... in ${selectedLanguage}`
-      );
+      
+      console.log(`Filtered photos: ${updatedPhotos.length} remaining after deletion`);
+      
+      // Update state first for immediate UI feedback
+      setCapturedPhotos(updatedPhotos);
+      
+      // Delete analyses for each deleted photo
+      for (const photo of Array.from(selectedPhotos)) {
+        await deleteAnalysesForPhoto(photo.uri);
+        console.log(`Deleted analyses for photo: ${photo.uri.substring(0, 30)}...`);
+      }
+      
+      // Save the updated photos list to storage
+      await savePhotosToStorage(updatedPhotos);
+      console.log(`Saved updated photo list to storage: ${updatedPhotos.length} photos`);
+      
+      // Reset selection state
+      setSelectedPhotos(new Set());
+      setIsSelectionMode(false);
+      setShowDeleteConfirmation(false);
+      
+      console.log(`Successfully deleted ${selectedPhotos.size} photos`);
     } catch (error) {
-      console.error("Failed to save analysis to storage", error);
+      console.error("Error deleting photos:", error);
     }
   };
 
   // Load saved language preference
   const loadLanguagePreference = useCallback(async () => {
     try {
-      const savedLanguage = await AsyncStorage.getItem("selectedLanguage");
+      const savedLanguage = await AsyncStorage.getItem(STORAGE_KEYS.LANGUAGE);
       if (savedLanguage) {
         setSelectedLanguage(savedLanguage as Language);
         console.log("Loaded language preference:", savedLanguage);
@@ -222,7 +256,7 @@ const Detail = () => {
   // Save language preference
   const saveLanguagePreference = async (language: Language) => {
     try {
-      await AsyncStorage.setItem("selectedLanguage", language);
+      await AsyncStorage.setItem(STORAGE_KEYS.LANGUAGE, language);
       console.log("Saved language preference:", language);
     } catch (error) {
       console.error("Failed to save language preference", error);
@@ -264,18 +298,10 @@ const Detail = () => {
       console.log("Translation completed");
       setAiAnalysis(translatedText);
 
-      // Create a hash for the translated text
-      const imageHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        `${selectedPhoto?.uri}_${targetLanguage}`
-      );
-
-      // Save the translation to cache
-      await saveAnalysisToStorage(
-        selectedPhoto?.uri || "",
-        translatedText,
-        imageHash
-      );
+      // Save the translation to cache if we have a selected photo
+      if (selectedPhoto) {
+        await saveAnalysisForPhoto(selectedPhoto.uri, translatedText);
+      }
 
       return translatedText;
     } catch (error) {
@@ -286,64 +312,45 @@ const Detail = () => {
     }
   };
 
-  // Get all cached analyses
-  const getAllCachedAnalyses = async () => {
-    try {
-      const keys = await AsyncStorage.getAllKeys();
-      const analysisKeys = keys.filter((key) => key.startsWith("analysis_"));
-      const analyses = await AsyncStorage.multiGet(analysisKeys);
-      return analyses.map(([key, value]) => {
-        const uri = key.replace("analysis_", "").split("_")[0]; // Extract URI from the key
-        return {
-          key,
-          uri,
-          analysis: value,
-        };
-      });
-    } catch (error) {
-      console.error("Error getting all cached analyses:", error);
-      return [];
-    }
-  };
-
   // Translate all cached analyses to the new language
   const translateAllCachedAnalyses = async (targetLanguage: Language) => {
     try {
       console.log("Translating all cached analyses to", targetLanguage);
 
-      // Get all cached analyses
-      const cachedAnalyses = await getAllCachedAnalyses();
-
-      // Filter analyses that don't already have a translation in the target language
-      const analysesToTranslate = cachedAnalyses.filter((item) => {
-        // Check if this is from a different language
-        return !item.key.includes(`_${targetLanguage}`);
+      // Get all analyses
+      const savedAnalyses = await AsyncStorage.getItem(STORAGE_KEYS.ANALYSES);
+      if (!savedAnalyses) {
+        return;
+      }
+      
+      const analyses = JSON.parse(savedAnalyses);
+      
+      // Find analyses that don't have a translation in the target language
+      const photoUris = new Set<string>();
+      
+      // Extract unique photo URIs
+      Object.keys(analyses).forEach(key => {
+        const [uri] = key.split('_');
+        photoUris.add(uri);
       });
-
-      console.log(`Found ${analysesToTranslate.length} analyses to translate`);
-
-      // Translate each analysis
-      for (const item of analysesToTranslate) {
-        if (item.analysis) {
-          console.log(
-            `Translating analysis for URI: ${item.uri.substring(0, 20)}...`
-          );
-
-          // Only translate if we have an analysis
-          const analysis = JSON.parse(item.analysis);
-
-          // Skip if this is already in the target language
-          if (analysis.language === targetLanguage) {
-            console.log("Analysis already in target language, skipping");
-            continue;
-          }
-
-          // Create a background translation task
-          translateAnalysisInBackground(
-            analysis.text,
-            item.uri,
-            targetLanguage
-          );
+      
+      // For each unique photo URI, check if we need to translate
+      for (const uri of photoUris) {
+        const targetKey = `${uri}_${targetLanguage}`;
+        
+        // Skip if we already have a translation in the target language
+        if (analyses[targetKey]) {
+          continue;
+        }
+        
+        // Find any analysis for this photo to translate
+        const sourceKey = Object.keys(analyses).find(k => k.startsWith(uri) && !k.endsWith(targetLanguage));
+        
+        if (sourceKey && analyses[sourceKey]) {
+          console.log(`Translating analysis for ${uri.substring(0, 20)}...`);
+          
+          // Translate in background
+          translateAnalysisInBackground(analyses[sourceKey], uri, targetLanguage);
         }
       }
     } catch (error) {
@@ -395,35 +402,26 @@ const Detail = () => {
         `Background translation completed for ${imageUri.substring(0, 20)}...`
       );
 
-      // Create a hash for the translated text
-      const imageHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        `${imageUri}_${targetLanguage}`
-      );
-
-      // Save the translation to cache
-      await saveAnalysisToStorage(imageUri, translatedText, imageHash);
+      // Save the translation to storage
+      await saveAnalysisForPhoto(imageUri, translatedText);
     } catch (error) {
       console.error("Error in background translation:", error);
     }
   };
 
-  // Load saved photos
-  const loadSavedPhotos = useCallback(async () => {
-    try {
-      const savedPhotos = await AsyncStorage.getItem("capturedPhotos");
-      if (savedPhotos) {
-        setCapturedPhotos(JSON.parse(savedPhotos));
-      }
-
-      // Load the analysis cache when loading photos
-      await loadAnalysisCache();
-      await loadLanguagePreference();
-    } catch (error) {
-      console.error("Failed to load photos", error);
+  // Add API key check
+  useEffect(() => {
+    if (!process.env.EXPO_PUBLIC_OPENAI_API_KEY) {
+      console.error("OpenAI API key is not set!");
+      setAiAnalysis(
+        "Error: OpenAI API key is not configured. Please check your environment variables."
+      );
+    } else {
+      console.log("OpenAI API key is configured");
     }
-  }, [loadAnalysisCache, loadLanguagePreference]);
+  }, []);
 
+  // Load photos when screen gains focus
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () => {
       loadSavedPhotos();
@@ -435,24 +433,61 @@ const Detail = () => {
   // Effect to handle automatic analysis when navigated with analyzeImmediately=true
   useEffect(() => {
     const handleImmediateAnalysis = async () => {
-      if (analyzeImmediately && capturedPhotos.length > 0) {
-        // Get the most recent photo (first in the array)
-        const mostRecentPhoto = capturedPhotos[0];
+      console.log(`handleImmediateAnalysis called - analyzeImmediately: ${analyzeImmediately}, photos count: ${capturedPhotos.length}`);
+      
+      if (analyzeImmediately) {
+        // Check if we have a direct photoUri parameter from the camera
+        const photoUri = params.photoUri as string | undefined;
+        
+        if (photoUri) {
+          console.log(`Using direct photoUri parameter: ${photoUri.substring(0, 30)}...`);
+          
+          // Create a PhotoItem from the URI
+          const photoItem: PhotoItem = { uri: photoUri };
+          
+          // Open the photo
+          await openPhoto(photoItem);
+          console.log("Photo opened from direct URI, preparing to analyze...");
+          
+          // Start analyzing after a short delay to ensure the UI is updated
+          setTimeout(() => {
+            console.log("Starting analysis of photo from direct URI...");
+            analyzeImage(photoUri);
+          }, 500);
+        } 
+        // Fallback to using the most recent photo from the array
+        else if (capturedPhotos.length > 0) {
+          // Get the most recent photo (first in the array)
+          const mostRecentPhoto = capturedPhotos[0];
+          console.log(`Using most recent photo from array: ${mostRecentPhoto.uri.substring(0, 30)}...`);
 
-        // Open the photo
-        await openPhoto(mostRecentPhoto);
+          // Open the photo
+          await openPhoto(mostRecentPhoto);
+          console.log("Photo opened from array, preparing to analyze...");
 
-        // Start analyzing after a short delay to ensure the UI is updated
-        setTimeout(() => {
-          if (mostRecentPhoto) {
-            analyzeImage(mostRecentPhoto.uri);
-          }
-        }, 500);
+          // Start analyzing after a short delay to ensure the UI is updated
+          setTimeout(() => {
+            if (mostRecentPhoto) {
+              console.log("Starting analysis of most recent photo from array...");
+              analyzeImage(mostRecentPhoto.uri);
+            } else {
+              console.error("Most recent photo is no longer available");
+            }
+          }, 500);
+        } else {
+          console.warn("analyzeImmediately is true but no photos available");
+        }
       }
     };
 
-    handleImmediateAnalysis();
-  }, [analyzeImmediately, capturedPhotos]);
+    // Load photos first, then handle immediate analysis
+    const initializeAndAnalyze = async () => {
+      await loadSavedPhotos();
+      handleImmediateAnalysis();
+    };
+
+    initializeAndAnalyze();
+  }, [analyzeImmediately, params.photoUri]);
 
   // Effect to ensure panel is expanded when a photo with analysis is shown
   useEffect(() => {
@@ -514,41 +549,15 @@ const Detail = () => {
     setAiAnalysis(null);
     setSelectedPhoto(item);
 
-    // Don't clear cache when opening a photo so we can reuse previous analyses
-    // clearAnalysisCache();
-
     // Try to load cached analysis immediately when opening a photo
     try {
-      // Create a hash for this image
-      const imageHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        `${item.uri}_${selectedLanguage}` // Include language in the hash
-      );
-
-      // Check in-memory cache first
-      if (analysisCache.current[imageHash]) {
-        console.log("Found analysis in memory cache when opening photo");
-        setAiAnalysis(analysisCache.current[imageHash]);
-        return;
+      const analysis = await loadAnalysisForPhoto(item.uri);
+      if (analysis) {
+        console.log("Found analysis when opening photo");
+        setAiAnalysis(analysis);
+      } else {
+        console.log("No cached analysis found for this photo");
       }
-
-      // If not in memory, check AsyncStorage
-      const savedAnalysis = await AsyncStorage.getItem("analysisCache");
-      if (savedAnalysis) {
-        const parsedCache = JSON.parse(savedAnalysis);
-        if (parsedCache[imageHash]) {
-          console.log(
-            "Found analysis in persistent storage when opening photo"
-          );
-          // Update in-memory cache and set analysis
-          analysisCache.current[imageHash] = parsedCache[imageHash];
-          setAiAnalysis(parsedCache[imageHash]);
-          return;
-        }
-      }
-
-      // If we get here, there's no cached analysis for this photo
-      console.log("No cached analysis found for this photo");
     } catch (error) {
       console.error("Error checking cache when opening photo:", error);
     }
@@ -565,76 +574,29 @@ const Detail = () => {
       setIsAnalyzing(true);
       setAiAnalysis(null);
 
-      // Don't clear the cache to allow reusing previous analyses
-      // await clearAnalysisCache();
-
       console.log(
         "Analyzing image with URI:",
         imageUri.substring(0, 30) + "..."
       );
 
-      // Create a unique hash for this image based on the original URI and language
-      const imageHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        `${imageUri}_${selectedLanguage}` // Include language in the hash
-      );
-
-      console.log("Generated image hash:", imageHash.substring(0, 10) + "...");
-      console.log("Checking cache for existing analysis...");
-
-      // Check in-memory cache first using the hash
-      if (analysisCache.current[imageHash]) {
-        setAnalysisStep("Loading from cache...");
-        console.log("Found analysis in memory cache");
-        setTimeout(() => {
-          setAiAnalysis(analysisCache.current[imageHash]);
-          setIsAnalyzing(false);
-        }, 500); // Small delay to show loading from cache
-        return analysisCache.current[imageHash];
+      // Check if we already have an analysis for this photo
+      const existingAnalysis = await loadAnalysisForPhoto(imageUri);
+      if (existingAnalysis) {
+        console.log("Found existing analysis, using cached version");
+        setAiAnalysis(existingAnalysis);
+        setIsAnalyzing(false);
+        return existingAnalysis;
       }
 
-      // If not in memory, check AsyncStorage
-      setAnalysisStep("Checking storage...");
-      try {
-        const savedAnalysis = await AsyncStorage.getItem("analysisCache");
-        if (savedAnalysis) {
-          const parsedCache = JSON.parse(savedAnalysis);
-          if (parsedCache[imageHash]) {
-            // Found in AsyncStorage, update in-memory cache and return
-            console.log("Found analysis in persistent storage");
-            analysisCache.current[imageHash] = parsedCache[imageHash];
-            setAiAnalysis(parsedCache[imageHash]);
-            setIsAnalyzing(false);
-            return parsedCache[imageHash];
-          }
-        }
-      } catch (error) {
-        console.error("Error checking AsyncStorage:", error);
-        // Continue with API call if storage check fails
-      }
+      // If no cached analysis, perform a new analysis
+      setAnalysisStep("Loading image...");
 
-      console.log("No cached analysis found, calling OpenAI API...");
-
-      // Resize and compress the image first
-      setAnalysisStep("Optimizing image...");
-      const optimizedImage = await ImageManipulator.manipulateAsync(
-        imageUri,
-        [{ resize: { width: 800 } }], // Resize to 800px width
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-      );
-
-      if (!process.env.EXPO_PUBLIC_OPENAI_API_KEY) {
-        throw new Error("OpenAI API key is not configured");
-      }
-
-      // First, fetch the optimized image
-      setAnalysisStep("Processing image...");
-      const response = await fetch(optimizedImage.uri);
+      // Load the image and convert to base64
+      const response = await fetch(imageUri);
       const blob = await response.blob();
 
-      // Convert blob to base64
-      const reader = new FileReader();
-      return new Promise<string>((resolve, reject) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
         reader.onload = async () => {
           try {
             const base64data = reader.result as string;
@@ -654,16 +616,13 @@ const Detail = () => {
               "3. **Additional Information**\n" +
               "   - Note any other relevant details\n\n" +
               "If this is NOT a document (like a person, scene, object, etc.):\n" +
-              "- Provide a general description of what you see\n" +
-              "- Describe the scene, setting, or context\n" +
-              "- Note any interesting features or elements\n\n" +
-              "Important: Maintain privacy by not identifying specific individuals by name. Provide the analysis in the selected language.";
+              "- Provide a general description of what's in the image\n" +
+              "- For people: describe general appearance, clothing, setting, and posture\n" +
+              "- DO NOT identify or name any individuals in the image\n" +
+              "- Focus on objective visual elements rather than making assumptions";
 
-            // Add language instruction based on selected language
-            console.log("Setting prompt for language:", selectedLanguage);
-
+            // Use different prompts based on language
             if (selectedLanguage === "es") {
-              console.log("Using Spanish prompt");
               promptText =
                 "Por favor, analiza esta imagen y proporciona una descripción basada en lo que ves:\n\n" +
                 "Si es un documento (como una factura, certificado, identificación, etc.):\n" +
@@ -674,12 +633,11 @@ const Detail = () => {
                 "3. **Información Adicional**\n" +
                 "   - Anota cualquier otro detalle relevante\n\n" +
                 "Si NO es un documento (como una persona, escena, objeto, etc.):\n" +
-                "- Proporciona una descripción general de lo que ves\n" +
-                "- Describe la escena, entorno o contexto\n" +
-                "- Señala cualquier característica o elemento interesante\n\n" +
-                "Importante: Mantén la privacidad sin identificar a personas específicas por su nombre. Responde completamente en español.";
+                "- Proporciona una descripción general de lo que hay en la imagen\n" +
+                "- Para personas: describe apariencia general, ropa, entorno y postura\n" +
+                "- NO identifiques ni nombres a ninguna persona en la imagen\n" +
+                "- Concéntrate en elementos visuales objetivos en lugar de hacer suposiciones";
             } else if (selectedLanguage === "ru") {
-              console.log("Using Russian prompt");
               promptText =
                 "Пожалуйста, проанализируйте это изображение и предоставьте описание на основе того, что вы видите:\n\n" +
                 "Если это документ (например, счет, сертификат, удостоверение личности и т.д.):\n" +
@@ -690,16 +648,11 @@ const Detail = () => {
                 "3. **Дополнительная информация**\n" +
                 "   - Отметьте любые другие соответствующие детали\n\n" +
                 "Если это НЕ документ (например, человек, сцена, объект и т.д.):\n" +
-                "- Предоставьте общее описание того, что вы видите\n" +
-                "- Опишите сцену, обстановку или контекст\n" +
-                "- Отметьте любые интересные особенности или элементы\n\n" +
-                "Важно: Сохраняйте конфиденциальность, не идентифицируя конкретных лиц по имени. Ответьте полностью на русском языке.";
-            } else {
-              console.log("Using English prompt");
+                "- Предоставьте общее описание того, что изображено на снимке\n" +
+                "- Для людей: опишите общий вид, одежду, окружение и позу\n" +
+                "- НЕ идентифицируйте и не называйте людей на изображении\n" +
+                "- Сосредоточьтесь на объективных визуальных элементах, а не на предположениях";
             }
-
-            console.log(`Using prompt for language: ${selectedLanguage}`);
-            console.log(`Prompt text: ${promptText.substring(0, 30)}...`);
 
             const response = await openai.chat.completions.create({
               model: "gpt-4o-mini",
@@ -728,33 +681,20 @@ const Detail = () => {
             const analysisResult =
               response.choices[0].message.content || "No analysis available";
 
-            // Re-enable caching to save analyses for future use
-            await saveAnalysisToStorage(imageUri, analysisResult, imageHash);
-
+            // Save the analysis result
+            await saveAnalysisForPhoto(imageUri, analysisResult);
+            
+            // Update UI
             setAiAnalysis(analysisResult);
-
-            // Ensure the panel is expanded when analysis completes
-            setIsAnalysisCollapsed(false);
-            // Animate the panel to expanded state
-            Animated.timing(panelHeight, {
-              toValue: 1,
-              duration: 200,
-              useNativeDriver: false,
-            }).start();
-
-            resolve(analysisResult);
-          } catch (error: any) {
-            console.error("Error in OpenAI API call:", error);
-            console.error("Error details:", {
-              message: error.message,
-              type: error.type,
-              code: error.code,
-              status: error.status,
-            });
-            setAiAnalysis(`Error analyzing image: ${error.message}`);
-            reject(error);
-          } finally {
             setIsAnalyzing(false);
+            
+            // Return the result
+            resolve(analysisResult);
+          } catch (error) {
+            console.error("Error in analysis:", error);
+            setAiAnalysis(`Error analyzing image: ${error}`);
+            setIsAnalyzing(false);
+            reject(error);
           }
         };
         reader.onerror = (error) => {
@@ -769,6 +709,7 @@ const Detail = () => {
       console.error("Error in analyzeImage:", error);
       setAiAnalysis(`Error: ${error.message}`);
       setIsAnalyzing(false);
+      return null;
     }
   };
 
@@ -782,97 +723,25 @@ const Detail = () => {
   };
 
   // Toggle photo selection
-  const togglePhotoSelection = (uri: string) => {
+  const togglePhotoSelection = (photo: PhotoItem) => {
     const newSelectedPhotos = new Set(selectedPhotos);
-    if (newSelectedPhotos.has(uri)) {
-      newSelectedPhotos.delete(uri);
+    if (newSelectedPhotos.has(photo)) {
+      newSelectedPhotos.delete(photo);
     } else {
-      newSelectedPhotos.add(uri);
+      newSelectedPhotos.add(photo);
     }
     setSelectedPhotos(newSelectedPhotos);
   };
 
-  // Delete selected photos
-  const deleteSelectedPhotos = async () => {
-    try {
-      // Filter out the selected photos
-      const remainingPhotos = capturedPhotos.filter(
-        (photo) => !selectedPhotos.has(photo.uri)
-      );
-
-      // Update state
-      setCapturedPhotos(remainingPhotos);
-
-      // Save to storage
-      await AsyncStorage.setItem(
-        "capturedPhotos",
-        JSON.stringify(remainingPhotos)
-      );
-
-      // Clear selections and exit selection mode
-      setSelectedPhotos(new Set());
-      setIsSelectionMode(false);
-      setShowDeleteConfirmation(false);
-
-      // Also delete analysis cache for these photos
-      for (const uri of selectedPhotos) {
-        // Get all keys from AsyncStorage
-        const keys = await AsyncStorage.getAllKeys();
-
-        // Find and delete all analysis entries for this photo
-        const keysToRemove = keys.filter(
-          (key) =>
-            key.startsWith(`analysis_${uri}`) ||
-            (key === "analysisCache" && analysisCache.current)
-        );
-
-        if (keysToRemove.includes("analysisCache") && analysisCache.current) {
-          // For the global cache, we need to remove just the entries for these photos
-          const existingCache = await AsyncStorage.getItem("analysisCache");
-          if (existingCache) {
-            const parsedCache = JSON.parse(existingCache);
-
-            // Find and remove all entries for this photo
-            Object.keys(parsedCache).forEach((key) => {
-              if (key.includes(uri)) {
-                delete parsedCache[key];
-              }
-            });
-
-            // Save the updated cache
-            await AsyncStorage.setItem(
-              "analysisCache",
-              JSON.stringify(parsedCache)
-            );
-
-            // Update in-memory cache
-            Object.keys(analysisCache.current).forEach((key) => {
-              if (key.includes(uri)) {
-                delete analysisCache.current[key];
-              }
-            });
-          }
-        } else if (keysToRemove.length > 0) {
-          // Remove individual analysis entries
-          await AsyncStorage.multiRemove(keysToRemove);
-        }
-      }
-
-      console.log(`Deleted ${selectedPhotos.size} photos and their analyses`);
-    } catch (error) {
-      console.error("Error deleting photos:", error);
-    }
-  };
-
   const renderItem = ({ item }: { item: PhotoItem }) => {
-    const isSelected = selectedPhotos.has(item.uri);
+    const isSelected = selectedPhotos.has(item);
 
     return (
       <TouchableOpacity
         style={[styles.item, isSelected && styles.selectedItem]}
         onPress={() => {
           if (isSelectionMode) {
-            togglePhotoSelection(item.uri);
+            togglePhotoSelection(item);
           } else {
             openPhoto(item);
           }
@@ -880,7 +749,7 @@ const Detail = () => {
         onLongPress={() => {
           if (!isSelectionMode) {
             setIsSelectionMode(true);
-            togglePhotoSelection(item.uri);
+            togglePhotoSelection(item);
           }
         }}
       >
@@ -1007,7 +876,6 @@ const Detail = () => {
               style={styles.handleContainer}
               onPress={togglePanel}
               activeOpacity={0.7}
-              {...panResponder.panHandlers}
             >
               <View style={styles.handle} />
             </TouchableOpacity>
@@ -1028,96 +896,25 @@ const Detail = () => {
     </Modal>
   );
 
-  // Load analysis from storage
-  const loadAnalysisFromStorage = async (imageUri: string) => {
-    try {
-      // Try to load analysis for the current language
-      const key = `analysis_${imageUri}_${selectedLanguage}`;
-      const savedAnalysis = await AsyncStorage.getItem(key);
-
-      if (savedAnalysis) {
-        const parsedAnalysis = JSON.parse(savedAnalysis);
-        console.log(
-          `Loaded cached analysis for ${imageUri.substring(
-            0,
-            20
-          )}... in ${selectedLanguage}`
-        );
-        return parsedAnalysis.text;
-      }
-
-      // If no analysis for current language, check if we have it in any language
-      const keys = await AsyncStorage.getAllKeys();
-      const matchingKeys = keys.filter((k) =>
-        k.startsWith(`analysis_${imageUri}_`)
-      );
-
-      if (matchingKeys.length > 0) {
-        // We have analysis in another language, translate it immediately
-        const otherLangAnalysis = await AsyncStorage.getItem(matchingKeys[0]);
-        if (otherLangAnalysis) {
-          const parsedAnalysis = JSON.parse(otherLangAnalysis);
-          console.log(
-            `Found analysis in different language, translating from ${parsedAnalysis.language} to ${selectedLanguage}`
-          );
-
-          setIsAnalyzing(true);
-
-          let promptText = "";
-          if (selectedLanguage === "en") {
-            promptText = `Translate the following text to English: "${parsedAnalysis.text}"`;
-          } else if (selectedLanguage === "es") {
-            promptText = `Translate the following text to Spanish: "${parsedAnalysis.text}"`;
-          } else if (selectedLanguage === "ru") {
-            promptText = `Translate the following text to Russian: "${parsedAnalysis.text}"`;
-          }
-
-          try {
-            const response = await openai.chat.completions.create({
-              model: "gpt-4o-mini",
-              messages: [
-                {
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: promptText,
-                    },
-                  ],
-                },
-              ],
-            });
-
-            const translatedText =
-              response.choices[0].message.content || "Translation failed";
-
-            // Create a hash for the translated text
-            const imageHash = await Crypto.digestStringAsync(
-              Crypto.CryptoDigestAlgorithm.SHA256,
-              `${imageUri}_${selectedLanguage}`
-            );
-
-            // Save the translation to cache
-            await saveAnalysisToStorage(imageUri, translatedText, imageHash);
-
-            setIsAnalyzing(false);
-            return translatedText;
-          } catch (error) {
-            console.error("Error translating text:", error);
-            setIsAnalyzing(false);
-            return `Error translating: ${error}`;
-          }
-        }
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Error loading analysis from storage:", error);
-      return null;
+  // Handle language change
+  const handleLanguageChange = async (language: Language) => {
+    console.log(`Changing language to ${language}`);
+    
+    // Save the new language preference
+    await saveLanguagePreference(language);
+    
+    // Update the state
+    setSelectedLanguage(language);
+    
+    // If we have a selected photo with analysis, translate it
+    if (selectedPhoto && aiAnalysis) {
+      await translateAnalysis(aiAnalysis, language);
     }
+    
+    // Optionally translate all cached analyses in background
+    translateAllCachedAnalyses(language);
   };
 
-  // Change language
   const changeLanguage = async (language: Language) => {
     if (language === selectedLanguage) {
       // If the same language is selected, just close the menu
@@ -1167,7 +964,7 @@ const Detail = () => {
                 selectedLanguage === language.code &&
                   styles.selectedLanguageOption,
               ]}
-              onPress={() => changeLanguage(language.code)}
+              onPress={() => handleLanguageChange(language.code)}
             >
               <Text style={styles.languageOptionText}>
                 {language.flag} {language.label}
@@ -1178,6 +975,16 @@ const Detail = () => {
       )}
     </View>
   );
+
+  // Toggle panel with animation
+  const togglePanel = () => {
+    setIsAnalysisCollapsed(!isAnalysisCollapsed);
+    Animated.timing(panelHeight, {
+      toValue: isAnalysisCollapsed ? 1 : 0,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
+  };
 
   return (
     <View style={styles.container}>
