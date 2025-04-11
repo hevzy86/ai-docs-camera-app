@@ -249,7 +249,12 @@ const Detail = () => {
         messages: [
           {
             role: "user",
-            content: promptText,
+            content: [
+              {
+                type: "text",
+                text: promptText,
+              },
+            ],
           },
         ],
       });
@@ -374,7 +379,12 @@ const Detail = () => {
         messages: [
           {
             role: "user",
-            content: promptText,
+            content: [
+              {
+                type: "text",
+                text: promptText,
+              },
+            ],
           },
         ],
       });
@@ -454,6 +464,50 @@ const Detail = () => {
       panelHeight.setValue(1);
     }
   }, [selectedPhoto, aiAnalysis]);
+
+  // Set header right component with select button
+  useEffect(() => {
+    if (capturedPhotos.length > 0) {
+      navigation.setOptions({
+        headerRight: () => (
+          <TouchableOpacity
+            style={styles.headerSelectButton}
+            onPress={toggleSelectionMode}
+          >
+            <Text style={styles.headerButtonText}>
+              {isSelectionMode ? "Cancel" : "Select"}
+            </Text>
+          </TouchableOpacity>
+        ),
+      });
+    }
+  }, [navigation, capturedPhotos.length, isSelectionMode]);
+
+  // Set header right component with delete button when in selection mode
+  useEffect(() => {
+    if (isSelectionMode && selectedPhotos.size > 0) {
+      navigation.setOptions({
+        headerRight: () => (
+          <View style={styles.headerButtonsContainer}>
+            <TouchableOpacity
+              style={styles.headerDeleteButton}
+              onPress={() => setShowDeleteConfirmation(true)}
+            >
+              <Text style={styles.headerButtonText}>
+                Delete ({selectedPhotos.size})
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerSelectButton}
+              onPress={toggleSelectionMode}
+            >
+              <Text style={styles.headerButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        ),
+      });
+    }
+  }, [navigation, isSelectionMode, selectedPhotos.size]);
 
   const openPhoto = async (item: PhotoItem) => {
     // Clear any previous analysis when opening a new photo
@@ -630,7 +684,6 @@ const Detail = () => {
                   ],
                 },
               ],
-              max_tokens: 500,
             });
 
             console.log("Received response from OpenAI"); // Debug log
@@ -990,7 +1043,12 @@ const Detail = () => {
               messages: [
                 {
                   role: "user",
-                  content: promptText,
+                  content: [
+                    {
+                      type: "text",
+                      text: promptText,
+                    },
+                  ],
                 },
               ],
             });
@@ -1089,38 +1147,12 @@ const Detail = () => {
   return (
     <View style={styles.container}>
       {capturedPhotos.length > 0 ? (
-        <>
-          <View style={styles.selectButtonContainer}>
-            <TouchableOpacity
-              style={styles.topRightSelectButton}
-              onPress={toggleSelectionMode}
-            >
-              <Text style={styles.subtleButtonText}>
-                {isSelectionMode ? "Cancel" : "Select"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {isSelectionMode && selectedPhotos.size > 0 && (
-            <View style={styles.deleteButtonContainer}>
-              <TouchableOpacity
-                style={styles.subtleDeleteButton}
-                onPress={() => setShowDeleteConfirmation(true)}
-              >
-                <Text style={styles.subtleButtonText}>
-                  Delete ({selectedPhotos.size})
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <FlatList
-            data={capturedPhotos}
-            renderItem={renderItem}
-            keyExtractor={(item, index) => index.toString()}
-            numColumns={3}
-          />
-        </>
+        <FlatList
+          data={capturedPhotos}
+          renderItem={renderItem}
+          keyExtractor={(item, index) => index.toString()}
+          numColumns={3}
+        />
       ) : (
         <Text style={styles.noPhotosText}>No photos captured yet.</Text>
       )}
@@ -1181,44 +1213,32 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 
-  subtleHeader: {
-    display: "none", // Hide the old header
+  headerButtonsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
   },
 
-  topBar: {
-    display: "none", // Hide the custom top bar
-  },
-
-  topBarTitle: {
-    display: "none", // Hide the title
-  },
-
-  selectButtonContainer: {
-    position: "absolute",
-    top: 10, // Position at the very top
-    right: 10,
-    zIndex: 100, // Ensure it's above everything
-  },
-
-  topRightSelectButton: {
+  headerSelectButton: {
     backgroundColor: "rgba(0, 122, 255, 0.8)",
-    paddingHorizontal: 12,
+    paddingHorizontal: 20,
     paddingVertical: 6,
     borderRadius: 15,
+    marginLeft: 0,
+    marginRight: 16,
   },
 
-  deleteButtonContainer: {
-    position: "absolute",
-    top: 10, // Same height as select button
-    right: 90, // Position to the left of select button
-    zIndex: 10,
-  },
-
-  subtleDeleteButton: {
+  headerDeleteButton: {
     backgroundColor: "rgba(255, 59, 48, 0.8)",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 15,
+    marginRight: 4,
+  },
+
+  headerButtonText: {
+    color: "white",
+    fontWeight: "600",
+    fontSize: 14,
   },
 
   modalOverlay: {
@@ -1434,6 +1454,12 @@ const styles = StyleSheet.create({
   },
   languageOptionText: {
     fontSize: 14,
+  },
+  noPhotosText: {
+    fontSize: 16,
+    textAlign: "center",
+    marginTop: 20,
+    color: "#666",
   },
 });
 
