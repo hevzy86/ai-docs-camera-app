@@ -902,105 +902,100 @@ const Detail = () => {
     );
   };
 
-  const renderFullScreenPhoto = () => (
-    <Modal
-      visible={selectedPhoto !== null}
-      transparent={false}
-      animationType="fade"
-    >
-      <SafeAreaView style={styles.fullScreenContainer}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.closeButton}
-            onPress={closePhoto}
-          >
-            <Text style={styles.closeButtonText}>←</Text>
-          </TouchableOpacity>
+const renderFullScreenPhoto = () => (
+  <Modal
+    visible={selectedPhoto !== null}
+    transparent={false}
+    animationType="fade"
+  >
+    <SafeAreaView style={styles.fullScreenContainer}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.closeButton}
+          onPress={closePhoto}
+        >
+          <Text style={styles.closeButtonText}>←</Text>
+        </TouchableOpacity>
 
-          {/* Language switcher in the middle of the header */}
-          {renderLanguageSwitcher()}
+        {renderLanguageSwitcher()}
 
-          <TouchableOpacity
-            style={styles.analyzeButton}
-            onPress={() => selectedPhoto && analyzeImage(selectedPhoto.uri)}
-            disabled={isAnalyzing}
-          >
-            <Text style={styles.analyzeButtonText}>
-              {isAnalyzing ? (
-                <ActivityIndicator
-                  size="small"
-                  color="#fff"
-                />
-              ) : (
-                "Analyze Image"
-              )}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <Image
-          source={{ uri: selectedPhoto?.uri }}
-          style={styles.fullScreenPhoto}
-          resizeMode="contain"
-        />
-
-        {/* Add TouchableOpacity overlay for tapping on the photo to collapse the panel */}
-        {aiAnalysis && !isAnalysisCollapsed && (
-          <TouchableOpacity
-            style={styles.photoTouchOverlay}
-            activeOpacity={1}
-            onPress={togglePanel}
-          />
-        )}
-
-        {isAnalyzing && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator
-              size="large"
-              color="#ffffff"
-            />
-            <Text style={styles.loadingText}>
-              {analysisStep || "Analyzing image..."}
-            </Text>
-          </View>
-        )}
-
-        {aiAnalysis && (
-          <Animated.View
-            style={[
-              styles.analysisContainer,
-              {
-                maxHeight: panelHeight.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ["8%", "60%"],
-                }),
-              },
-            ]}
-          >
-            <TouchableOpacity
-              style={styles.handleContainer}
-              onPress={togglePanel}
-              activeOpacity={0.7}
-              {...panResponder.panHandlers}
-            >
-              <View style={styles.handle} />
-            </TouchableOpacity>
-
-            {!isAnalysisCollapsed && (
-              <ScrollView
-                style={styles.scrollView}
-                contentContainerStyle={styles.scrollViewContent}
-                showsVerticalScrollIndicator={true}
-                bounces={true}
-              >
-                <Text style={styles.analysisText}>{aiAnalysis}</Text>
-              </ScrollView>
+        <TouchableOpacity
+          style={styles.analyzeButton}
+          onPress={() => selectedPhoto && analyzeImage(selectedPhoto.uri)}
+          disabled={isAnalyzing}
+        >
+          <Text style={styles.analyzeButtonText}>
+            {isAnalyzing ? (
+              <ActivityIndicator
+                size="small"
+                color="#fff"
+              />
+            ) : (
+              "Analyze Image"
             )}
-          </Animated.View>
-        )}
-      </SafeAreaView>
-    </Modal>
-  );
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <Image
+        source={{ uri: selectedPhoto?.uri }}
+        style={styles.fullScreenPhoto}
+        resizeMode="contain"
+      />
+
+      {isAnalyzing && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator
+            size="large"
+            color="#ffffff"
+          />
+          <Text style={styles.loadingText}>
+            {analysisStep || "Analyzing image..."}
+          </Text>
+        </View>
+      )}
+
+      {aiAnalysis && (
+        <Animated.View
+          style={[
+            styles.analysisContainer,
+            {
+              maxHeight: panelHeight.interpolate({
+                inputRange: [0, 1],
+                outputRange: ["8%", "60%"],
+              }),
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.handleContainer}
+            onPress={togglePanel}
+            activeOpacity={0.7}
+            {...panResponder.panHandlers}
+          >
+            <View style={styles.handle} />
+          </TouchableOpacity>
+
+          {!isAnalysisCollapsed && (
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={styles.scrollViewContent}
+              showsVerticalScrollIndicator={true}
+              bounces={true}
+            >
+              <Text style={styles.analysisText}>{aiAnalysis}</Text>
+            </ScrollView>
+          )}
+        </Animated.View>
+      )}
+    </SafeAreaView>
+  </Modal>
+);
+
+
+
+
+
 
   // Load analysis from storage
   const loadAnalysisFromStorage = async (imageUri: string) => {
