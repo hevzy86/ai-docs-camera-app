@@ -921,6 +921,9 @@ const Detail = () => {
   const handleLanguageChange = async (language: Language) => {
     console.log(`Changing language to ${language}`);
     
+    // Close the language menu immediately
+    setIsLanguageMenuOpen(false);
+    
     // Save the new language preference
     await saveLanguagePreference(language);
     
@@ -936,33 +939,6 @@ const Detail = () => {
     translateAllCachedAnalyses(language);
   };
 
-  const changeLanguage = async (language: Language) => {
-    if (language === selectedLanguage) {
-      // If the same language is selected, just close the menu
-      setIsLanguageMenuOpen(false);
-      return;
-    }
-
-    console.log(`Changing language from ${selectedLanguage} to ${language}`);
-    const previousLanguage = selectedLanguage;
-    setSelectedLanguage(language);
-    setIsLanguageMenuOpen(false);
-    await saveLanguagePreference(language);
-
-    // If there's an analysis, translate it instead of reanalyzing
-    if (selectedPhoto && aiAnalysis) {
-      console.log(
-        `Language changed to ${language}, translating existing analysis...`
-      );
-
-      // Translate the existing analysis instead of reanalyzing the image
-      await translateAnalysis(aiAnalysis, language);
-    }
-
-    // Start background translation of all cached analyses
-    translateAllCachedAnalyses(language);
-  };
-
   const renderLanguageSwitcher = () => (
     <View style={styles.languageSwitcherContainer}>
       <TouchableOpacity
@@ -970,8 +946,11 @@ const Detail = () => {
         onPress={() => setIsLanguageMenuOpen(!isLanguageMenuOpen)}
       >
         <Text style={styles.languageButtonText}>
-          {languages.find((lang) => lang.code === selectedLanguage)?.flag}{" "}
-          {selectedLanguage.toUpperCase()}
+          {selectedLanguage === "en"
+            ? "🇺🇸 EN"
+            : selectedLanguage === "es"
+            ? "🇪🇸 ES"
+            : "🇷🇺 RU"}
         </Text>
       </TouchableOpacity>
 
@@ -985,7 +964,9 @@ const Detail = () => {
                 selectedLanguage === language.code &&
                   styles.selectedLanguageOption,
               ]}
-              onPress={() => handleLanguageChange(language.code)}
+              onPress={() => {
+                handleLanguageChange(language.code);
+              }}
             >
               <Text style={styles.languageOptionText}>
                 {language.flag} {language.label}
