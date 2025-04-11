@@ -944,6 +944,15 @@ const Detail = () => {
           resizeMode="contain"
         />
 
+        {/* Add TouchableOpacity overlay for tapping on the photo to collapse the panel */}
+        {aiAnalysis && !isAnalysisCollapsed && (
+          <TouchableOpacity
+            style={styles.photoTouchOverlay}
+            activeOpacity={1}
+            onPress={togglePanel}
+          />
+        )}
+
         {isAnalyzing && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator
@@ -1460,6 +1469,15 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 20,
     color: "#666",
+  },
+  photoTouchOverlay: {
+    position: "absolute",
+    top: 100, // Leave space for the header buttons
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "transparent",
+    zIndex: 1,
   },
 });
 
